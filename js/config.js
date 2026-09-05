@@ -19,8 +19,11 @@ export const APP_VERSION = '1.1.0';
 /* Social sign-in buttons shown on the login screen.
    Each works once the matching provider is enabled in your Supabase
    dashboard (Authentication → Providers) — see docs/SETUP.md.
-   Remove a name from this list to hide its button.                    */
-export const OAUTH_PROVIDERS = ['google', 'apple'];
+   Remove a name from this list to hide its button.
+   Apple is hidden for now — re-add it once you have an Apple Developer
+   account and have enabled the provider in Supabase:
+   export const OAUTH_PROVIDERS = ['google', 'apple'];                */
+export const OAUTH_PROVIDERS = ['google'];
 
 /* True once you've filled in real credentials.
    Anon keys are JWTs ("eyJ…") — or the newer "sb_publishable_…" format. */
