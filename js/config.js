@@ -14,7 +14,7 @@ export const SUPABASE_URL = 'https://parxbunzpvtmynzelvoc.supabase.co';
 export const SUPABASE_ANON_KEY = 'sb_publishable_IdAbFCTer57ZR6Gfeyibxg_SOU62eoj';
 
 export const APP_NAME = 'CardVault';
-export const APP_VERSION = '1.3.1';
+export const APP_VERSION = '1.4.0';
 
 /* Social sign-in buttons shown on the login screen.
    Each works once the matching provider is enabled in your Supabase
@@ -25,10 +25,12 @@ export const APP_VERSION = '1.3.1';
    export const OAUTH_PROVIDERS = ['google', 'apple'];                */
 export const OAUTH_PROVIDERS = ['google'];
 
-/* OCR languages (Tesseract codes, '+'-separated). 'eng' covers most cards.
-   Set to 'eng+ben' if your cards are mostly Bengali — the extra language
-   data (~MB) is downloaded once and cached on the device.                */
-export const OCR_LANGS = 'eng';
+/* OCR languages (Tesseract codes, '+'-separated). Default reads English AND
+   Bengali — extra language data downloads once (~1.4 MB for Bengali) and is
+   cached on the device. Cards in other scripts? Add codes here, e.g.
+   'eng+ben+hin' (Hindi), 'eng+ben+ara' (Arabic), 'eng+ben+chi_sim' (Chinese).
+   Use 'eng' alone for English-only cards (slightly faster).               */
+export const OCR_LANGS = 'eng+ben';
 
 /* True once you've filled in real credentials.
    Anon keys are JWTs ("eyJ…") — or the newer "sb_publishable_…" format. */

@@ -213,6 +213,68 @@ testCaseDual(
   }
 );
 
+/* ---- v1.4.0: multi-value, Bengali, back-side cases ------------------------ */
+
+testCase(
+  'multiple emails are all kept (comma-joined)',
+  ['Rakib Hasan', 'info@apex-eng.com', 'rakib.hasan@apex-eng.com'].join('\n'),
+  { email: 'info@apex-eng.com, rakib.hasan@apex-eng.com' }
+);
+
+testCase(
+  'multiple phones up to four',
+  ['Sadia Islam', '01711-223344', '02-8877665', '01812-998877', '01913-445566'].join('\n'),
+  { phone: '01711-223344, 02-8877665, 01812-998877, 01913-445566' }
+);
+
+testCase(
+  'Bengali name, designation, company and address',
+  ['মেহেদী টেলিকম', 'সালমান খান', 'ব্যবস্থাপক', '০১২৩৪-৬৪৬৭৮৯০', '১২ নং রোড মতিঝিল ঢাকা'].join('\n'),
+  { name: 'সালমান খান', designation: 'ব্যবস্থাপক', phone: '01234-6467890', address: '১২ নং রোড মতিঝিল ঢাকা' }
+);
+
+testCase(
+  'Bengali phone digits are transliterated for dialing',
+  ['হাসান মাহমুদ', 'মোবাইল: ০১৭১২-৩৪৫৬৭৮'].join('\n'),
+  { phone: '01712-345678' }
+);
+
+testCase(
+  'truncated email TLD repaired from the card website',
+  ['Nusrat Jahan', 'nusrat.jahan@bengalsolutions.co', 'www.bengalsolutions.com'].join('\n'),
+  { email: 'nusrat.jahan@bengalsolutions.com' }
+);
+
+testCase(
+  'duplicate commas in a joined address are collapsed',
+  ['Level 7, Apex Tower, 42 Gulshan Avenue,', 'Gulshan 1, Dhaka 1212'].join('\n'),
+  { address: 'Level 7, Apex Tower, 42 Gulshan Avenue, Gulshan 1, Dhaka 1212' }
+);
+
+testCaseDual(
+  'back side (logo) merged with front (details): front wins, back fills blanks',
+  [
+    'APEX ENGINEERING & CONSULTANCY LTD.',
+    'Muhammad Arif Chowdhury',
+    'Deputy General Manager',
+    '+880 1819-998877',
+    'arif.chowdhury@apex-eng.com',
+    'www.apex-eng.com'
+  ].join('\n'),
+  [
+    'APEX',
+    'Level 7, Apex Tower, Gulshan Avenue, Dhaka 1212',
+    '01711-223344'
+  ].join('\n'),
+  {
+    name: 'Muhammad Arif Chowdhury',
+    company: 'APEX ENGINEERING & CONSULTANCY LTD.',
+    phone: '+880 1819-998877, 01711-223344',
+    email: 'arif.chowdhury@apex-eng.com',
+    address: 'Level 7, Apex Tower, Gulshan Avenue, Dhaka 1212'
+  }
+);
+
 /* ------------------------------------------------------------------------ */
 
 console.log(`\n${passed} passed, ${failed} failed`);

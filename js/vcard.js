@@ -63,7 +63,11 @@ export function buildVCard(card, photoBase64 = null) {
     lines.push(`TEL;TYPE=${type}:${escVal(p)}`);
   });
 
-  if (card.email) lines.push(`EMAIL;TYPE=INTERNET:${escVal(card.email)}`);
+  const emails = String(card.email || '')
+    .split(/[,;]/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+  emails.forEach((e) => lines.push(`EMAIL;TYPE=INTERNET:${escVal(e)}`));
   if (card.website) {
     const url = /^https?:\/\//i.test(card.website) ? card.website : `https://${card.website}`;
     lines.push(`URL:${escVal(url)}`);

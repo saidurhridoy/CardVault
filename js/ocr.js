@@ -161,7 +161,9 @@ const DESIGNATION_RE = new RegExp(
   'specialist|executive|officer|assistant|associate|coordinator|supervisor|trainer|lecturer|professor|teacher|' +
   'dentist|doctor|surgeon|physician|cardiologist|neurologist|dermatologist|pediatrician|gynecologist|' +
   'accountant|auditor|lawyer|editor|writer|photographer|producer|strategist|researcher|scientist|' +
-  'representative|agent|broker|recruiter|intern|chartered|surveyor|planner|chemist|physiotherapist)\\b',
+  'representative|agent|broker|recruiter|intern|chartered|surveyor|planner|chemist|physiotherapist)\\b' +
+  '|(পরিচালক|ব্যবস্থাপক|সহকারী|প্রধান|চেয়ারম্যান|সভাপতি|মহাসচিব|সম্পাদক|প্রতিষ্ঠাতা|মালিক|অফিসার|নির্বাহী|' +
+  'ইঞ্জিনিয়ার|কনসালট্যান্ট|শিক্ষক|প্রফেসর|ডাক্তার|হিসাবরক্ষক|প্রোপ্রাইটর|প্রোপাইটর|বিক্রয়|ক্রয়)',
   'i'
 );
 
@@ -173,7 +175,9 @@ const COMPANY_RE = new RegExp(
   'tech|solutions|services|group|industries|enterprises|holdings|trading|agency|studio|labs?|systems|' +
   'consultancy|international|global|ventures|capital|media|software|digital|networks|communications|' +
   'bank|insurance|hospital|clinic|pharma|logistics|shipping|aviation|fashion|retail|associates|brothers|' +
-  'motors|foods|textiles|concern|associates|gmbh|plc|pty)\\b',
+  'motors|foods|textiles|concern|associates|gmbh|plc|pty)\\b' +
+  '|(লিমিটেড|প্রাইভেট|সংস্থা|কোম্পানি|গ্রুপ|ব্যাংক|হাসপাতাল|কনস্ট্রাকশন|ফার্মাসিউটিক্যাল|ইলেকট্রনিক্স|' +
+  'এন্টারপ্রাইজ|ট্রেডার্স|ইন্ডাস্ট্রিজ|এজেন্সি|কমিউনিকেশন|টেলিকম|ফার্ম|স্টোর|ইলেকট্রিক্স|মোটরস)',
   'i'
 );
 
@@ -181,13 +185,22 @@ const ADDRESS_KW_RE = new RegExp(
   '\\b(road|rd|street|st|avenue|ave|block|sector|phase|floor|fl|level|suite|ste|room|plot|house|lane|' +
   'p\\.?o|box|district|city|town|postal|zip|dhaka|chattogram|chittagong|sylhet|khulna|rajshahi|barishal|' +
   'barisal|rangpur|mymensingh|gulshan|banani|dhanmondi|uttara|mirpur|basundhara|bashundhara|mohakhali|' +
-  'motijheel|farmgate|khilgaon|badda|tegaon|tejgaon)\\b',
+  'motijheel|farmgate|khilgaon|badda|tegaon|tejgaon)\\b' +
+  '|(রোড|সড়ক|নং|ভবন|ফ্লোর|সেক্টর|ব্লক|বাংলাদেশ|ঢাকা|চট্টগ্রাম|সিলেট|খুলনা|রাজশাহী|বরিশাল|রংপুর|ময়মনসিংহ|' +
+  'গুলশান|বনানী|ধানমন্ডি|উত্তরা|মিরপুর|মতিঝিল|মোহাম্মদপুর|টঙ্গী|গাজীপুর|নারায়ণগঞ্জ|কেরানীগঞ্জ|যাত্রাবাড়ী)',
   'i'
 );
 
 const wordCount = (s) => s.trim().split(/\s+/).filter(Boolean).length;
-const hasDigit = (s) => /\d/.test(s);
+/* \d is ASCII-only — cards also print Bengali (০-৯) and Arabic (٠-٩) digits */
+const hasDigit = (s) => /[0-9০-৯٠-٩]/.test(s);
+/* any-script letter/digit, so Bengali/Arabic/Hindi lines survive the noise filter */
+const WORDISH_RE = /[A-Za-z0-9\u00C0-\u024F\u0370-\u04FF\u0590-\u06FF\u0900-\u097F\u0980-\u09FF\u0E00-\u0E7F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]/g;
 const isNameToken = (t) => /^[A-Za-z\u0980-\u09FF][A-Za-z\u0980-\u09FF.'’-]*$/.test(t) || /^[A-Za-z]{1,2}\.$/.test(t);
+
+/* Bengali + Arabic-Indic digit transliteration (for phone matching only) */
+const DIGIT_MAP = { '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9', '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9' };
+const toAsciiDigits = (s) => s.replace(/[০-৯٠-٩]/g, (d) => DIGIT_MAP[d]);
 
 /** Line is just `match` (plus a label/punctuation) and nothing else meaningful. */
 function lineIsOnly(line, match) {
@@ -223,9 +236,11 @@ function phoneKey(tok) {
   return d;
 }
 
-/** Extract phone-like tokens from anywhere in a line (labels tolerated). */
+/** Extract phone-like tokens from anywhere in a line (labels tolerated).
+ *  Bengali/Arabic digits are transliterated so those numbers dial too.     */
 function extractPhones(line) {
-  const matches = line.match(PHONE_TOKEN_RE) || [];
+  const ascii = toAsciiDigits(line);
+  const matches = ascii.match(PHONE_TOKEN_RE) || [];
   const out = [];
   for (const m of matches) {
     const digits = m.replace(/\D/g, '');
@@ -235,14 +250,42 @@ function extractPhones(line) {
   return out;
 }
 
+/** Collapse OCR duplicate commas / spaces in a joined address. */
+function tidyAddress(s) {
+  return String(s || '')
+    .replace(/\s*,\s*(,\s*)+/g, ', ')
+    .replace(/,\s*$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/** If the card's own website extends the email's domain (email read as
+ *  "…solutions.co" while the site says "…solutions.com"), trust the site. */
+function crossFieldEmailRepair(out) {
+  if (!out.email || !out.website) return out;
+  const list = String(out.email).split(',').map((e) => e.trim()).filter(Boolean);
+  if (!list.length) return out;
+  const primary = list[0];
+  const host = (primary.split('@')[1] || '').toLowerCase();
+  const site = String(out.website)
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .split('/')[0]
+    .toLowerCase();
+  if (host && site && site !== host && site.startsWith(host) && /^[a-z0-9.-]+$/.test(host)) {
+    list[0] = primary.replace(/@.*$/, '@' + site);
+    out.email = list.join(', ');
+  }
+  return out;
+}
+
 /** Merge two parses (e.g. sparse-text pass + block pass) into the best of
  *  both: first non-empty per field, longest company, most coherent address,
- *  union of phones with de-duplication.                                        */
+ *  union of phones/emails with de-duplication.                              */
 export function mergeCardParses(a, b) {
   const out = { ...a };
   if (!out.name && b.name) out.name = b.name;
   if (!out.designation && b.designation) out.designation = b.designation;
-  if (!out.email && b.email) out.email = b.email;
   if (!out.website && b.website) out.website = b.website;
   if (String(b.company || '').length > String(out.company || '').length) out.company = b.company;
   if (addressScore(b.address) > addressScore(out.address)) out.address = b.address;
@@ -257,9 +300,23 @@ export function mergeCardParses(a, b) {
       const k = phoneKey(t);
       if (seen.has(k)) return;
       seen.add(k);
-      if (phones.length < 3) phones.push(t);
+      if (phones.length < 4) phones.push(t);
     });
   out.phone = phones.join(', ');
+  const seenE = new Set();
+  const emails = [];
+  String(a.email || '')
+    .split(',')
+    .concat(String(b.email || '').split(','))
+    .forEach((e) => {
+      const t = e.trim().toLowerCase();
+      if (!t || seenE.has(t)) return;
+      seenE.add(t);
+      if (emails.length < 3) emails.push(e.trim());
+    });
+  out.email = emails.join(', ');
+  out.address = tidyAddress(out.address);
+  crossFieldEmailRepair(out);
   if (!out.notes && b.notes) out.notes = b.notes;
   return out;
 }
@@ -292,7 +349,7 @@ export function parseCardText(rawText) {
   let lines = String(rawText)
     .split(/\r?\n/)
     .map((l) => l.replace(/\s+/g, ' ').trim())
-    .filter((l) => (l.match(/[A-Za-z0-9]/g) || []).length >= 2)
+    .filter((l) => (l.match(WORDISH_RE) || []).length >= 2)
     .filter((l) => !LABEL_ONLY_RE.test(l));
 
   const joined = [];
@@ -354,8 +411,7 @@ export function parseCardText(rawText) {
       return;
     }
     const stripped = line.replace(LABEL_RE, '').trim();
-    const digits = (stripped.match(/\d/g) || []).length;
-    if (digits > 0 && (stripped.includes(',') || ADDRESS_KW_RE.test(stripped)) && wordCount(stripped) >= 2) {
+    if (hasDigit(stripped) && (stripped.includes(',') || ADDRESS_KW_RE.test(stripped)) && wordCount(stripped) >= 2) {
       addresses.push(stripped);
       used.add(i);
     }
@@ -410,14 +466,14 @@ export function parseCardText(rawText) {
   if (desigIdx > -1) out.designation = clean(lines[desigIdx]);
   if (companyIdx > -1) out.company = clean(lines[companyIdx]);
 
-  out.email = emails[0] || '';
+  out.email = emails.slice(0, 3).join(', ');
   out.website = (urls.find((u) => /^https?:\/\/(www\.)?/i.test(u)) || urls[0] || '')
     .replace(/^https?:\/\//i, '');
-  out.phone = phones.slice(0, 3).join(', ');
-  out.address = addresses.join(', ');
+  out.phone = phones.slice(0, 4).join(', ');
+  out.address = tidyAddress(addresses.join(', '));
+  crossFieldEmailRepair(out);
 
   const extra = [];
-  if (emails.length > 1) extra.push('Email: ' + emails.slice(1).join(', '));
   if (urls.length > 1) extra.push('Web: ' + urls.slice(1).map((u) => u.replace(/^https?:\/\//i, '')).join(', '));
   const noteLines = leftovers.map((i) => lines[i]).filter((l) => l !== out.name);
   if (noteLines.length) extra.unshift(noteLines.join(' · '));
