@@ -1,0 +1,8 @@
+{
+  "appId": "com.saidurhridoy.cardvault",
+  "appName": "CardVault",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

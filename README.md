@@ -51,22 +51,23 @@ cloud sync, and **vCard export** to your phone's contacts.
 Try it right now at **https://cardvault-app.surge.sh** — create a free account
 (email confirmation) and start scanning. Works in any modern browser.
 
-## 📱 Install on Android (APK)
+## 📱 Install on Android (native app)
 
-CardVault ships as a real, installable Android app — a **Trusted Web Activity**
-(Google's recommended PWA→APK wrapper, built from [`android/`](android/README.md)):
+CardVault ships as a **standalone Android app** (built with
+[Capacitor 7](https://capacitorjs.com) — see [`native/`](native/)): the entire
+app is bundled inside the APK and runs in the app's own WebView.
 
-- ⬇️ **Download:** [CardVault-v1.2.1.apk](https://github.com/saidurhridoy/CardVault/releases/download/v1.2.1/CardVault-v1.2.1.apk) (~687 KB)
-- On your Android phone (5.0+): open the link → download → tap the file →
-  allow "install from unknown sources" if asked → done.
-- The app launches fullscreen (no browser bar) with the CardVault icon, splash
-  screen, camera scanning, OCR and cloud sync — and it auto-updates whenever
-  the website is redeployed. No Play Store account needed.
-- Chrome (or any Custom Tabs browser, e.g. Edge/Samsung Internet) must be
-  present — virtually every Android phone has one.
+- ⬇️ **Download:** [CardVault-v1.3.0.apk](https://github.com/saidurhridoy/CardVault/releases/download/v1.3.0/CardVault-v1.3.0.apk) (~4.5 MB)
+- **Android 7.0+** · no browser needed, no browser UI — it's a real app with
+  its own icon, splash screen and camera permission prompt
+- Works fully offline for browsing previously synced cards; internet is only
+  needed for sign-in and cloud sync (Supabase)
+- App shell + libraries (supabase-js, tesseract.js) are bundled — nothing is
+  loaded from a CDN at startup
+- The OCR engine files download on first scan and are cached on-device
 
-The APK is signed with the project release key and verified against
-`/.well-known/assetlinks.json` on the live site (Digital Asset Links).
+The website (below) remains the always-up-to-date web version; the APK is
+updated per release.
 
 ## 🚀 Quick start
 
