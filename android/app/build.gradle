@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Signing info lives in keystore.properties (git-ignored) so the key never enters the repo.
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+android {
+    namespace 'com.saidurhridoy.cardvault'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.saidurhridoy.cardvault"
+        minSdk 21
+        targetSdk 34
+        versionCode 12000
+        versionName "1.2.0"
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropsFile.exists()) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
+
+dependencies {
+    // Google's official TWA support library (LauncherActivity, splash, fallbacks)
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}

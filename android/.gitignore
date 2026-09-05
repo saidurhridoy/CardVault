@@ -1,0 +1,12 @@
+# Gradle / build output
+.gradle/
+build/
+local.properties
+
+# Signing material — never commit
+keystore/
+keystore.properties
+
+# Built artifacts
+*.apk
+*.aab

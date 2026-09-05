@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="appName">CardVault</string>
+    <string name="providerAuthority" translatable="false">com.saidurhridoy.cardvault.fileprovider</string>
+    <string name="assetStatements" translatable="false">[{\"include\": \"https://cardvault-app.surge.sh/.well-known/assetlinks.json\"}]</string>
+</resources>

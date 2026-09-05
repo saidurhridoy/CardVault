@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the web app's theme-color (#4f46e5) -->
+    <color name="colorPrimary">#4F46E5</color>
+    <color name="navigationColor">#FFFFFF</color>
+    <!-- Adaptive icon background (matches the maskable icon's lavender edge) -->
+    <color name="iconBackground">#AAA7E6</color>
+    <color name="splashBackground">#FFFFFF</color>
+</resources>

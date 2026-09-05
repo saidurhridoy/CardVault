@@ -1,0 +1,4 @@
+// CardVault Android — Trusted Web Activity wrapper around https://cardvault-app.surge.sh
+plugins {
+    id 'com.android.application' version '8.5.2' apply false
+}

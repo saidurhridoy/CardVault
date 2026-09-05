@@ -1,0 +1,3 @@
+# Re-include .well-known for Android App Links verification
+!.well-known/
+!.well-known/**

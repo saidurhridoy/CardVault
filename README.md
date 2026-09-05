@@ -48,8 +48,25 @@ cloud sync, and **vCard export** to your phone's contacts.
 
 ## 🌐 Live demo
 
-Try it right now at **https://cardvault-app.surge.sh** — tap **“Try demo mode”**
-(no signup needed; demo cards stay on your device).
+Try it right now at **https://cardvault-app.surge.sh** — create a free account
+(email confirmation) and start scanning. Works in any modern browser.
+
+## 📱 Install on Android (APK)
+
+CardVault ships as a real, installable Android app — a **Trusted Web Activity**
+(Google's recommended PWA→APK wrapper, built from [`android/`](android/README.md)):
+
+- ⬇️ **Download:** [CardVault-v1.2.0.apk](https://github.com/saidurhridoy/CardVault/releases/download/v1.2.0/CardVault-v1.2.0.apk) (~685 KB)
+- On your Android phone (5.0+): open the link → download → tap the file →
+  allow "install from unknown sources" if asked → done.
+- The app launches fullscreen (no browser bar) with the CardVault icon, splash
+  screen, camera scanning, OCR and cloud sync — and it auto-updates whenever
+  the website is redeployed. No Play Store account needed.
+- Chrome (or any Custom Tabs browser, e.g. Edge/Samsung Internet) must be
+  present — virtually every Android phone has one.
+
+The APK is signed with the project release key and verified against
+`/.well-known/assetlinks.json` on the live site (Digital Asset Links).
 
 ## 🚀 Quick start
 
