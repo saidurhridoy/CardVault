@@ -1,6 +1,6 @@
 /* CardVault service worker — offline app shell + CDN runtime cache.
    Bump CACHE_VERSION whenever you change any app file, so users get the update. */
-const CACHE_VERSION = 'cardvault-v3';
+const CACHE_VERSION = 'cardvault-v5';
 
 const APP_SHELL = [
   './',
@@ -11,6 +11,7 @@ const APP_SHELL = [
   './js/util.js',
   './js/db.js',
   './js/ocr.js',
+  './js/ocr-pre.js',
   './js/vcard.js',
   './js/app.js',
   './icons/icon-192.png',

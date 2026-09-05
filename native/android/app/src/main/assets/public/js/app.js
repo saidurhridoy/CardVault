@@ -5,9 +5,9 @@
    capture, OCR review, card detail, edit, and settings.
    ========================================================================== */
 
-import { IS_CONFIGURED, APP_NAME, APP_VERSION, OAUTH_PROVIDERS } from './config.js';
+import { IS_CONFIGURED, APP_NAME, APP_VERSION, OAUTH_PROVIDERS, OCR_LANGS } from './config.js';
 import * as db from './db.js';
-import { runOcr, parseCardText } from './ocr.js';
+import { recognizeCard, parseCardText, mergeCardParses } from './ocr.js';
 import { buildVCard, buildVCardCollection, vcardFileName } from './vcard.js';
 import {
   $, esc, debounce, toast, uid, formatDate, initials, gradientFor,
@@ -594,18 +594,20 @@ function setCountLine(text) {
 
 /* ============================================================ capture    -- */
 
-const cam = { stream: null, facing: 'environment', torch: false, video: null, torchTrack: null };
+const cam = { stream: null, facing: 'environment', torch: false, video: null, torchTrack: null, onCaptured: null };
 
-async function openCapture() {
+async function openCapture(onCaptured) {
+  const isBack = typeof onCaptured === 'function';
+  cam.onCaptured = isBack ? onCaptured : null;
   const el = document.createElement('div');
   el.className = 'cam-overlay';
   el.innerHTML = `
     <video class="cam-video" id="camVideo" playsinline autoplay muted></video>
     <div class="cam-frame"><div class="cam-frame-box"><i></i><i></i><i></i><i></i></div></div>
-    <p class="cam-hint">Fit the business card inside the frame</p>
+    <p class="cam-hint">${isBack ? 'Fit the <b>back</b> of the card inside the frame' : 'Fit the business card inside the frame'}</p>
     <div class="cam-top">
       <button class="cam-btn" id="camClose" aria-label="Close">${SVG.x}</button>
-      <div class="cam-title">Scan card</div>
+      <div class="cam-title">${isBack ? 'Scan back side' : 'Scan card'}</div>
       <button class="cam-btn" id="camFlip" aria-label="Flip camera" title="Flip camera">${SVG.flip}</button>
     </div>
     <div class="cam-error" id="camError" hidden>
@@ -645,8 +647,10 @@ async function openCapture() {
     try {
       const raw = await fileToDataUrl(file);
       const dataUrl = await downscaleDataUrl(raw, 1600, 0.85);
+      const cb = cam.onCaptured;
+      cam.onCaptured = null;
       requestCloseTop(true);
-      openReview(dataUrl);
+      cb ? cb(dataUrl) : openReview(dataUrl);
     } catch (err) {
       toast('Could not read that image', 'error');
     }
@@ -710,6 +714,7 @@ function stopCamera() {
   }
   cam.video = null;
   cam.torchTrack = null;
+  cam.onCaptured = null;
 }
 
 function captureFrame(el) {
@@ -720,10 +725,39 @@ function captureFrame(el) {
   c.height = video.videoHeight;
   c.getContext('2d').drawImage(video, 0, 0);
   const raw = c.toDataURL('image/jpeg', 0.92);
+  const cb = cam.onCaptured;
+  cam.onCaptured = null;
   requestCloseTop(true); // also stops the camera via onClose
   downscaleDataUrl(raw, 1600, 0.85)
-    .then((dataUrl) => openReview(dataUrl))
-    .catch(() => openReview(raw));
+    .then((dataUrl) => (cb ? cb(dataUrl) : openReview(dataUrl)))
+    .catch(() => (cb ? cb(raw) : openReview(raw)));
+}
+
+/** Stack front + back photos into one image (stored as the card photo). */
+function loadImgEl(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Could not load image'));
+    img.src = src;
+  });
+}
+
+async function composeCardImage(frontUrl, backUrl) {
+  const [f, b] = await Promise.all([loadImgEl(frontUrl), loadImgEl(backUrl)]);
+  const W = Math.max(f.naturalWidth, b.naturalWidth);
+  const fh = Math.round((f.naturalHeight * W) / f.naturalWidth);
+  const bh = Math.round((b.naturalHeight * W) / b.naturalWidth);
+  const gap = Math.max(10, Math.round(W * 0.02));
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = fh + gap + bh;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(f, 0, 0, W, fh);
+  ctx.drawImage(b, 0, fh + gap, W, bh);
+  return c.toDataURL('image/jpeg', 0.85);
 }
 
 /* ============================================================ review     -- */
@@ -791,6 +825,9 @@ const OCR_STATUS_MSG = {
 
 function openReview(dataUrl) {
   let rawText = '';
+  const sides = { front: dataUrl || null, back: null };
+  let mergedFields = null;
+  let ocrChain = Promise.resolve(); // keeps front → back OCR order deterministic
   const backdrop = openSheet(`
     ${sheetHead(dataUrl ? 'New card' : 'New card (manual)')}
     <div class="sheet-body">
@@ -802,7 +839,8 @@ function openReview(dataUrl) {
           <div class="ocr-box">
             <div class="ocr-status" id="ocrStatus">${SPINNER_DARK} <span>Preparing OCR…</span></div>
             <div class="progress"><div class="progress-bar" id="ocrBar"></div></div>
-            <p class="form-hint" style="margin:8px 0 0">First scan downloads the OCR engine (~4&nbsp;MB), then it works offline.</p>
+            <p class="form-hint" style="margin:8px 0 0">First scan downloads the OCR engine (~5&nbsp;MB, English + Bengali), then it works offline.</p>
+            <div id="backSideBox" style="margin-top:12px"></div>
           </div>
         </figure>` : `
         <div class="notice notice-info">${SVG.info}<span>No photo — you can add the details by hand, or paste the card text below and let CardVault parse it.</span></div>`}
@@ -830,6 +868,63 @@ function openReview(dataUrl) {
     });
   };
 
+  /* ---- back side (logo / extra details) ---- */
+  function renderBackSide() {
+    const box = backdrop.querySelector('#backSideBox');
+    if (!box || !sides.front) return;
+    if (!sides.back) {
+      box.innerHTML = `
+        <button type="button" class="btn btn-outline btn-sm" id="addBackBtn" style="width:100%">
+          ${SVG.image} Add back side <span style="font-weight:400">(logo / more details)</span>
+        </button>`;
+      box.querySelector('#addBackBtn').onclick = () => openCapture(attachBackSide);
+    } else {
+      box.innerHTML = `
+        <div style="display:flex;gap:10px;align-items:center">
+          <img src="${esc(sides.back)}" alt="Back of card" style="width:88px;height:58px;object-fit:cover;border-radius:8px;border:1px solid rgba(0,0,0,.18)">
+          <div style="flex:1;font-size:.85rem;color:#5b616e">Back side captured — extra details will be merged.</div>
+          <button type="button" class="btn btn-outline btn-sm" id="retakeBackBtn">Retake</button>
+          <button type="button" class="btn btn-outline btn-sm" id="removeBackBtn" aria-label="Remove back side">✕</button>
+        </div>`;
+      box.querySelector('#retakeBackBtn').onclick = () => openCapture(attachBackSide);
+      box.querySelector('#removeBackBtn').onclick = () => {
+        sides.back = null;
+        renderBackSide();
+        toast('Back side removed');
+      };
+    }
+  }
+
+  function attachBackSide(backUrl) {
+    sides.back = backUrl;
+    renderBackSide();
+    const status = backdrop.querySelector('#ocrStatus');
+    const bar = backdrop.querySelector('#ocrBar');
+    const show = (html) => { if (status) { status.classList.remove('ocr-done'); status.innerHTML = html; } };
+    show(`${SPINNER_DARK} <span>Scanning back side…</span>`);
+    if (bar) bar.style.width = '4%';
+    ocrChain = ocrChain.then(async () => {
+      const r = await recognizeCard(backUrl, (m) => {
+        const msg = OCR_STATUS_MSG[m.status] || m.status;
+        show(`${SPINNER_DARK} <span>Back side: ${esc(msg)}</span>`);
+        if (typeof m.progress === 'number' && bar) bar.style.width = Math.round(m.progress * 100) + '%';
+      }, { langs: OCR_LANGS });
+      rawText = rawText ? rawText + '\n\n— back side —\n\n' + r.text : r.text;
+      mergedFields = mergedFields ? mergeCardParses(mergedFields, r.fields) : r.fields;
+      fillForm(mergedFields);
+      if (bar) bar.style.width = '100%';
+      if (status) {
+        status.classList.add('ocr-done');
+        status.innerHTML = `${SVG.check} <span>Back side scanned — extra details merged</span>`;
+      }
+    }).catch((err) => {
+      console.warn(err);
+      if (status) status.innerHTML = `${SVG.alert} <span>${esc(err.message || 'Back-side OCR failed')}</span>`;
+    });
+  }
+
+  renderBackSide();
+
   backdrop.querySelector('#pasteParse')?.addEventListener('click', () => {
     const text = backdrop.querySelector('#pasteBox').value;
     if (!text.trim()) return toast('Paste some text first', 'error');
@@ -837,19 +932,19 @@ function openReview(dataUrl) {
     toast('Fields filled — please verify ✓');
   });
 
-  // Run OCR
+  // Run OCR (dual-pass: sparse + block, merged — see js/ocr.js)
   if (dataUrl) {
-    runOcr(dataUrl, (m) => {
+    ocrChain = ocrChain.then(() => recognizeCard(dataUrl, (m) => {
       const status = backdrop.querySelector('#ocrStatus');
       const bar = backdrop.querySelector('#ocrBar');
       if (!status || !bar) return;
       const msg = OCR_STATUS_MSG[m.status] || m.status;
       status.innerHTML = `${SPINNER_DARK} <span>${esc(msg)}</span>`;
       if (typeof m.progress === 'number') bar.style.width = Math.round(m.progress * 100) + '%';
-    }).then((text) => {
+    }, { langs: OCR_LANGS })).then(({ text, fields }) => {
       rawText = text;
-      const parsed = parseCardText(text);
-      fillForm(parsed);
+      mergedFields = fields;
+      fillForm(fields);
       const status = backdrop.querySelector('#ocrStatus');
       const bar = backdrop.querySelector('#ocrBar');
       const scan = backdrop.querySelector('#scanOverlay');
@@ -880,11 +975,16 @@ function openReview(dataUrl) {
     saveBtn.disabled = true;
     saveBtn.innerHTML = SPINNER + 'Saving…';
     try {
-      const image = dataUrl
-        ? (state.mode === 'local' ? dataUrl : await dataUrlToBlob(dataUrl))
+      let imageUrl = dataUrl;
+      if (dataUrl && sides.back) {
+        try { imageUrl = await composeCardImage(dataUrl, sides.back); }
+        catch (e) { console.warn('Could not stitch sides, saving front only', e); }
+      }
+      const image = imageUrl
+        ? (state.mode === 'local' ? imageUrl : await dataUrlToBlob(imageUrl))
         : null;
       const card = await store.add(fields, image, rawText);
-      if (dataUrl) card._imgUrl = dataUrl; // show the photo immediately
+      if (imageUrl) card._imgUrl = imageUrl; // show the photo immediately
       state.cards.unshift(card);
       state.offline = false;
       renderGrid();
@@ -892,7 +992,7 @@ function openReview(dataUrl) {
       requestCloseTop();
       reviewForceClose = false;
       toast('Card saved ✓');
-      if (state.mode === 'cloud' && dataUrl && !card.card_image_path) {
+      if (state.mode === 'cloud' && imageUrl && !card.card_image_path) {
         toast('Photo could not be uploaded — details saved', 'info', 4000);
       }
     } catch (err) {
@@ -927,7 +1027,9 @@ function openDetail(id) {
   const c = state.cards.find((x) => x.id === id);
   if (!c) return;
 
-  const phone1 = String(c.phone || '').split(/[,;]/)[0].trim();
+  const phones = String(c.phone || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  const emails = String(c.email || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  const phone1 = phones[0] || '';
   const web = c.website ? (/^https?:\/\//i.test(c.website) ? c.website : 'https://' + c.website) : '';
   const maps = c.address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.address) : '';
   const imgUrl = state.mode === 'local' ? (c.image_data || null) : (c._imgUrl || null);
@@ -944,8 +1046,8 @@ function openDetail(id) {
     </div>`;
 
   const rows = [
-    c.phone && row('phone', 'Phone', c.phone, 'tel:' + phone1),
-    c.email && row('mail', 'Email', c.email, 'mailto:' + c.email),
+    ...phones.map((p, i) => row('phone', phones.length > 1 ? `Phone ${i + 1}` : 'Phone', p, 'tel:' + p)),
+    ...emails.map((e, i) => row('mail', emails.length > 1 ? `Email ${i + 1}` : 'Email', e, 'mailto:' + e)),
     c.website && row('globe', 'Website', c.website, web),
     c.address && row('map', 'Address', c.address, maps),
     c.notes && row('file', 'Notes', c.notes, null)
@@ -964,7 +1066,7 @@ function openDetail(id) {
       </div>
       <div class="detail-actions">
         ${phone1 ? `<a class="act act-primary" href="tel:${esc(phone1)}">${SVG.phone} Call</a>` : ''}
-        ${c.email ? `<a class="act" href="mailto:${esc(c.email)}">${SVG.mail} Email</a>` : ''}
+        ${emails[0] ? `<a class="act" href="mailto:${esc(emails[0])}">${SVG.mail} Email</a>` : ''}
         ${web ? `<a class="act" href="${esc(web)}" target="_blank" rel="noopener">${SVG.globe} Website</a>` : ''}
         ${maps ? `<a class="act" href="${esc(maps)}" target="_blank" rel="noopener">${SVG.map} Map</a>` : ''}
         <button class="act" data-action="vcard" data-id="${esc(c.id)}">${SVG.download} Save contact</button>
