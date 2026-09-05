@@ -1,0 +1,21 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Local env / secrets (never commit service-role keys!)
+.env
+.env.local
+
+# Tesseract language data downloaded during local OCR testing
+*.traineddata

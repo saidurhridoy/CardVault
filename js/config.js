@@ -1,0 +1,22 @@
+/* ============================================================================
+   CardVault configuration — THE ONLY FILE YOU NEED TO EDIT
+   ----------------------------------------------------------------------------
+   1. Create a free project at https://supabase.com (see docs/SETUP.md)
+   2. Run supabase/schema.sql in the Supabase SQL editor
+   3. Paste your project URL + anon (public) key below
+
+   The anon key is meant to be public — database security is enforced by
+   Row Level Security, so each user can only ever read/write their own cards.
+   NEVER put the service_role key here.
+   ========================================================================== */
+
+export const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
+export const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+
+export const APP_NAME = 'CardVault';
+export const APP_VERSION = '1.0.0';
+
+/* True once you've filled in real credentials. */
+export const IS_CONFIGURED =
+  /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(SUPABASE_URL) &&
+  /^ey[A-Za-z0-9_-]+$/.test(SUPABASE_ANON_KEY);
