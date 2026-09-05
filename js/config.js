@@ -14,7 +14,7 @@ export const SUPABASE_URL = 'https://parxbunzpvtmynzelvoc.supabase.co';
 export const SUPABASE_ANON_KEY = 'sb_publishable_IdAbFCTer57ZR6Gfeyibxg_SOU62eoj';
 
 export const APP_NAME = 'CardVault';
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.3.1';
 
 /* Social sign-in buttons shown on the login screen.
    Each works once the matching provider is enabled in your Supabase
@@ -24,6 +24,11 @@ export const APP_VERSION = '1.1.0';
    account and have enabled the provider in Supabase:
    export const OAUTH_PROVIDERS = ['google', 'apple'];                */
 export const OAUTH_PROVIDERS = ['google'];
+
+/* OCR languages (Tesseract codes, '+'-separated). 'eng' covers most cards.
+   Set to 'eng+ben' if your cards are mostly Bengali — the extra language
+   data (~MB) is downloaded once and cached on the device.                */
+export const OCR_LANGS = 'eng';
 
 /* True once you've filled in real credentials.
    Anon keys are JWTs ("eyJ…") — or the newer "sb_publishable_…" format. */

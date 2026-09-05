@@ -5,9 +5,9 @@
    capture, OCR review, card detail, edit, and settings.
    ========================================================================== */
 
-import { IS_CONFIGURED, APP_NAME, APP_VERSION, OAUTH_PROVIDERS } from './config.js';
+import { IS_CONFIGURED, APP_NAME, APP_VERSION, OAUTH_PROVIDERS, OCR_LANGS } from './config.js';
 import * as db from './db.js';
-import { runOcr, parseCardText } from './ocr.js';
+import { recognizeCard, parseCardText } from './ocr.js';
 import { buildVCard, buildVCardCollection, vcardFileName } from './vcard.js';
 import {
   $, esc, debounce, toast, uid, formatDate, initials, gradientFor,
@@ -837,18 +837,18 @@ function openReview(dataUrl) {
     toast('Fields filled — please verify ✓');
   });
 
-  // Run OCR
+  // Run OCR (dual-pass: sparse + block, merged — see js/ocr.js)
   if (dataUrl) {
-    runOcr(dataUrl, (m) => {
+    recognizeCard(dataUrl, (m) => {
       const status = backdrop.querySelector('#ocrStatus');
       const bar = backdrop.querySelector('#ocrBar');
       if (!status || !bar) return;
       const msg = OCR_STATUS_MSG[m.status] || m.status;
       status.innerHTML = `${SPINNER_DARK} <span>${esc(msg)}</span>`;
       if (typeof m.progress === 'number') bar.style.width = Math.round(m.progress * 100) + '%';
-    }).then((text) => {
+    }, { langs: OCR_LANGS }).then(({ text, fields }) => {
       rawText = text;
-      const parsed = parseCardText(text);
+      const parsed = fields;
       fillForm(parsed);
       const status = backdrop.querySelector('#ocrStatus');
       const bar = backdrop.querySelector('#ocrBar');

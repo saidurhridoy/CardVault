@@ -3,21 +3,140 @@
    plus a heuristic parser that turns raw OCR text into structured fields.
    The user always gets to review/edit before saving, so the parser only
    needs to be "good enough" as a pre-fill.
+
+   v1.3.1 quality upgrades (validated against a 4-card OCR test lab):
+   • persistent worker (no re-download / re-init per scan)
+   • image preprocessing from ./ocr-pre.js (auto-crop + resize + contrast)
+   • dual-pass recognition: sparse-text PSM 11 (isolated labels, emails)
+     followed by block PSM 6 (correct reading order for addresses);
+     results are merged per-field, best-of-both
+   • parser: label lines without separators, phones anywhere in a line,
+     OCR-mangled emails (lost dots / commas), "&" company continuations
    ========================================================================== */
 
+import { preprocessForOcr } from './ocr-pre.js';
+
+/* ---------------------------------------------------------------------------
+   OCR engine (browser only)
+   ------------------------------------------------------------------------- */
+
+let _worker = null;
+let _workerLangs = null;
+
+async function getWorker(langs, onProgress) {
+  const T = window.Tesseract;
+  if (_worker && _workerLangs === langs) return _worker;
+  if (_worker) { try { await _worker.terminate(); } catch (e) { /* ignore */ } _worker = null; _workerLangs = null; }
+  try {
+    _worker = await T.createWorker(langs, 1, {
+      logger: (m) => { if (onProgress) onProgress(m); }
+    });
+    _workerLangs = langs;
+  } catch (e) {
+    if (langs !== 'eng') {
+      // extra language data unavailable (offline / CDN hiccup) — degrade to eng
+      _worker = await T.createWorker('eng', 1, {
+        logger: (m) => { if (onProgress) onProgress(m); }
+      });
+      _workerLangs = 'eng';
+    } else {
+      throw e;
+    }
+  }
+  return _worker;
+}
+
+async function recognizeWithPsm(worker, image, psm) {
+  await worker.setParameters({
+    tessedit_pageseg_mode: String(psm),
+    preserve_interword_spaces: '1'
+  });
+  const res = await worker.recognize(image);
+  return (res && res.data && res.data.text) || '';
+}
+
+/** Load a data URL / <img> / <canvas> into a canvas of a sane size. */
+function toCanvas(image) {
+  return new Promise((resolve, reject) => {
+    const draw = (img, w, h) => {
+      const MAX = 2600; // guard against huge photos
+      const scale = Math.min(1, MAX / Math.max(w, h));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(w * scale));
+      c.height = Math.max(1, Math.round(h * scale));
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      resolve(c);
+    };
+    if (typeof HTMLCanvasElement !== 'undefined' && image instanceof HTMLCanvasElement) {
+      draw(image, image.width, image.height);
+    } else if (image && image.width && image.complete !== undefined) {
+      if (image.complete && image.naturalWidth) draw(image, image.naturalWidth, image.naturalHeight);
+      else {
+        image.onload = () => draw(image, image.naturalWidth, image.naturalHeight);
+        image.onerror = () => reject(new Error('Could not read the captured image.'));
+      }
+    } else if (typeof image === 'string') {
+      const img = new Image();
+      img.onload = () => draw(img, img.naturalWidth, img.naturalHeight);
+      img.onerror = () => reject(new Error('Could not read the captured image.'));
+      img.src = image;
+    } else {
+      reject(new Error('Unsupported image for OCR.'));
+    }
+  });
+}
+
 /**
- * Recognize text in an image (data URL / URL / canvas / blob).
- * Calls onProgress({ status, progress }) for UI feedback.
- * Throws a friendly Error if the OCR engine is unavailable (e.g. offline).
+ * Recognize a card image and parse it into fields.
+ * @param {string|HTMLImageElement|HTMLCanvasElement} image
+ * @param {function} onProgress  receives Tesseract logger messages ({status, progress})
+ * @param {{langs?: string}} opts  OCR languages, e.g. 'eng' or 'eng+ben'
+ * @returns {Promise<{text: string, fields: object}>}
  */
-export async function runOcr(image, onProgress) {
+export async function recognizeCard(image, onProgress, opts) {
   if (typeof window === 'undefined' || !window.Tesseract) {
     throw new Error('OCR engine not loaded — you may be offline. Enter the details manually.');
   }
-  const result = await window.Tesseract.recognize(image, 'eng', {
-    logger: (m) => { if (onProgress) onProgress(m); }
-  });
-  return result?.data?.text || '';
+  const langs = (opts && opts.langs) || 'eng';
+  const canvas = await toCanvas(image);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const src = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  // preprocess: auto-crop the card, resize into the sweet spot, stretch contrast
+  let proc = src;
+  try { proc = preprocessForOcr(src); } catch (e) { /* keep raw */ }
+  const procCanvas = document.createElement('canvas');
+  procCanvas.width = proc.width;
+  procCanvas.height = proc.height;
+  procCanvas.getContext('2d').putImageData(
+    new ImageData(new Uint8ClampedArray(proc.data.buffer ? proc.data.buffer : proc.data), proc.width, proc.height),
+    0, 0
+  );
+
+  try {
+    const worker = await getWorker(langs, onProgress);
+    const PSM = (window.Tesseract && window.Tesseract.PSM) || {};
+    // Pass 1 — sparse text: best for isolated labels, emails, numbers
+    const sparseText = await recognizeWithPsm(worker, procCanvas, PSM.SPARSE_TEXT || '11');
+    // Pass 2 — single block: best for reading order (multi-line addresses)
+    const blockText = await recognizeWithPsm(worker, procCanvas, PSM.SINGLE_BLOCK || '6');
+    const fields = parseCardTextDual(sparseText, blockText);
+    return { text: (sparseText + '\n' + blockText).trim(), fields };
+  } catch (e) {
+    // fall back to the one-shot API (still on the preprocessed image)
+    const res = await window.Tesseract.recognize(procCanvas, langs, {
+      logger: (m) => { if (onProgress) onProgress(m); }
+    });
+    const text = (res && res.data && res.data.text) || '';
+    return { text, fields: parseCardText(text) };
+  }
+}
+
+/** Backwards-compatible one-shot helper: returns raw recognized text only. */
+export async function runOcr(image, onProgress) {
+  const r = await recognizeCard(image, onProgress);
+  return r.text;
 }
 
 /* ---------------------------------------------------------------------------
@@ -27,7 +146,10 @@ export async function runOcr(image, onProgress) {
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 const URL_RE = /(?:https?:\/\/|www\.)[^\s,;|<>"')]+/i;
 const BARE_DOMAIN_RE = /^[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)+(?:\/[^\s]*)?$/;
-const PHONE_CHARS_RE = /^[+()[\]{}\s\d.,/-]{6,}$/;
+const PHONE_TOKEN_RE = /\+?\d[\d\s().\-\/]{6,}\d/g;
+
+const LABEL_ONLY_RE =
+  /^(?:tel|telephone|phone|mobile|mob|cell|ph|hotline|whatsapp|email|e-?mail|mail|web|website|url|add(?:ress)?|office|contact|fax)\s*[.:-]?\s*$/i;
 
 const LABEL_RE =
   /^(?:tel|telephone|phone|mobile|mob|cell|ph|hotline|whatsapp|email|e-?mail|mail|web|website|url|add(?:ress)?|office|contact|fax|p|m|t|c|f|e|w)\s*[.:-]\s*/i;
@@ -65,7 +187,7 @@ const ADDRESS_KW_RE = new RegExp(
 
 const wordCount = (s) => s.trim().split(/\s+/).filter(Boolean).length;
 const hasDigit = (s) => /\d/.test(s);
-const isNameToken = (t) => /^[A-Za-z][A-Za-z.'’-]*$/.test(t) || /^[A-Za-z]{1,2}\.$/.test(t);
+const isNameToken = (t) => /^[A-Za-z\u0980-\u09FF][A-Za-z\u0980-\u09FF.'’-]*$/.test(t) || /^[A-Za-z]{1,2}\.$/.test(t);
 
 /** Line is just `match` (plus a label/punctuation) and nothing else meaningful. */
 function lineIsOnly(line, match) {
@@ -76,24 +198,85 @@ function lineIsOnly(line, match) {
   return rest.length < 2;
 }
 
-function nameScore(line) {
-  const tokens = line.trim().split(/\s+/).filter(Boolean);
-  if (tokens.length < 2 || tokens.length > 4) return 0;
-  if (!tokens.every(isNameToken)) return 0;
-  if (hasDigit(line)) return 0;
-  if (DESIGNATION_RE.test(line) || COMPANY_RE.test(line) || EMAIL_RE.test(line)) return 0;
-  const titleIsh = tokens.every((t) => /^[A-Z]/.test(t));
-  return 1 + (titleIsh ? 1 : 0) + (tokens.length <= 3 ? 0.5 : 0);
+/** Repair common OCR mangles inside a probable email:
+ *  "nusrat jahan@x.com" (lost dot)  → "nusrat.jahan@x.com"
+ *  "info@company,com"   (comma)     → "info@company.com"
+ *  Only joins lowercase words (emails print lowercase) of ≥3 chars, so
+ *  "Contact John at john@x.com" is left alone.                             */
+function repairEmailish(s) {
+  return s
+    .replace(/\b([a-z0-9][a-z0-9._%+-]{2,})\s+([a-z0-9][a-z0-9._%+-]{2,})\s*@/g, '$1.$2@')
+    .replace(/@([A-Za-z0-9.-]+?)\s*,\s*([A-Za-z]{2,})(?![A-Za-z])/g, '@$1.$2');
 }
 
-function normalizeUrl(u) {
-  let url = String(u || '').trim().replace(/[.,;)]+$/, '');
-  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-  return url;
+/** Repair "www.company,com" style comma-for-dot OCR errors. */
+function repairDomainComma(s) {
+  return s.replace(/(\.[A-Za-z0-9-]+)\s*,\s*([A-Za-z]{2,4})\b/g, '$1.$2');
 }
 
-function looksLikeUrlLine(line) {
-  return BARE_DOMAIN_RE.test(line) && !line.includes('@') && /\.[A-Za-z]{2,}$/.test(line.split('/').pop() || '');
+/** Normalized key used to dedupe the same phone written differently
+ *  (+880 1712… vs 01712…) so a card doesn't list one number twice.       */
+function phoneKey(tok) {
+  const d = String(tok).replace(/\D/g, '');
+  if (d.startsWith('00')) return d.slice(2);
+  if (d.startsWith('880') && d.length >= 12) return '0' + d.slice(3);
+  return d;
+}
+
+/** Extract phone-like tokens from anywhere in a line (labels tolerated). */
+function extractPhones(line) {
+  const matches = line.match(PHONE_TOKEN_RE) || [];
+  const out = [];
+  for (const m of matches) {
+    const digits = m.replace(/\D/g, '');
+    if (digits.length < 8) continue; // house/plot numbers, years, PINs
+    out.push(m.trim().replace(/\s{2,}/g, ' '));
+  }
+  return out;
+}
+
+/** Merge two parses (e.g. sparse-text pass + block pass) into the best of
+ *  both: first non-empty per field, longest company, most coherent address,
+ *  union of phones with de-duplication.                                        */
+export function mergeCardParses(a, b) {
+  const out = { ...a };
+  if (!out.name && b.name) out.name = b.name;
+  if (!out.designation && b.designation) out.designation = b.designation;
+  if (!out.email && b.email) out.email = b.email;
+  if (!out.website && b.website) out.website = b.website;
+  if (String(b.company || '').length > String(out.company || '').length) out.company = b.company;
+  if (addressScore(b.address) > addressScore(out.address)) out.address = b.address;
+  const seen = new Set();
+  const phones = [];
+  String(a.phone || '')
+    .split(',')
+    .concat(String(b.phone || '').split(','))
+    .forEach((p) => {
+      const t = p.trim();
+      if (!t) return;
+      const k = phoneKey(t);
+      if (seen.has(k)) return;
+      seen.add(k);
+      if (phones.length < 3) phones.push(t);
+    });
+  out.phone = phones.join(', ');
+  if (!out.notes && b.notes) out.notes = b.notes;
+  return out;
+}
+
+/** Prefer addresses with more meaningful parts and fewer fragments. */
+function addressScore(s) {
+  if (!s) return -1;
+  const parts = s.split(',').map((p) => p.trim()).filter(Boolean);
+  const good = parts.filter((p) => /([A-Za-z]{2,}|\d{2,})/.test(p)).length;
+  return good * 10 - parts.length;
+}
+
+/** Parse two OCR reads (e.g. PSM 11 + PSM 6) and merge them. */
+export function parseCardTextDual(textA, textB) {
+  const a = parseCardText(textA);
+  if (!textB) return a;
+  return mergeCardParses(a, parseCardText(textB));
 }
 
 /**
@@ -104,43 +287,74 @@ export function parseCardText(rawText) {
   const out = { name: '', designation: '', company: '', phone: '', email: '', website: '', address: '', notes: '' };
   if (!rawText) return out;
 
-  const lines = String(rawText)
+  // -- normalize lines: collapse whitespace, drop noise & bare label lines,
+  //    join "&"-continuations so split company names become one line
+  let lines = String(rawText)
     .split(/\r?\n/)
     .map((l) => l.replace(/\s+/g, ' ').trim())
-    .filter((l) => (l.match(/[A-Za-z0-9]/g) || []).length >= 2);
+    .filter((l) => (l.match(/[A-Za-z0-9]/g) || []).length >= 2)
+    .filter((l) => !LABEL_ONLY_RE.test(l));
+
+  const joined = [];
+  for (const l of lines) {
+    const prev = joined.length ? joined[joined.length - 1] : '';
+    const prevClean = prev.replace(/[\s,;:.]+$/, '');
+    if (prevClean && /&$/.test(prevClean)) {
+      joined[joined.length - 1] = prevClean + ' ' + l;          // "APEX ENGINEERING &" + "CONSULTANCY LTD."
+    } else if (/,$/.test(prev) && !hasDigit(prev) && !hasDigit(l) && !l.includes('@')) {
+      joined[joined.length - 1] = prev.replace(/,$/, '') + ', ' + l; // "Level 7, Apex Tower," + "Gulshan…"
+    } else {
+      joined.push(l);
+    }
+  }
+  lines = joined;
 
   const used = new Set();
   const emails = [], urls = [], phones = [], addresses = [];
 
-  // Pass 1: emails & websites (search anywhere in the line)
+  // Pass 1: emails & websites (search anywhere in the line).
+  // A blurry photo often loses the dot in the local part, so per line we
+  // prefer the repaired email when it explains more of the text.
   lines.forEach((line, i) => {
-    const em = line.match(EMAIL_RE);
+    let emLine = line;
+    let em = line.match(EMAIL_RE);
+    const rep = repairEmailish(line);
+    if (rep !== line) {
+      const rem = rep.match(EMAIL_RE);
+      if (rem && (!em || rem[0].length > em[0].length)) { emLine = rep; em = rem; }
+    }
     if (em) {
       if (!emails.includes(em[0])) emails.push(em[0]);
-      if (lineIsOnly(line, em[0])) used.add(i);
+      if (lineIsOnly(emLine, em[0])) used.add(i);
     }
-    const um = line.match(URL_RE);
+    const rline = repairDomainComma(line);
+    const um = rline.match(URL_RE);
     if (um) {
       const u = normalizeUrl(um[0]);
       if (!urls.includes(u)) urls.push(u);
-      if (lineIsOnly(line, um[0])) used.add(i);
-    } else if (looksLikeUrlLine(line)) {
-      const u = normalizeUrl(line);
+      if (lineIsOnly(rline, um[0])) used.add(i);
+    } else if (looksLikeUrlLine(rline)) {
+      const u = normalizeUrl(rline);
       if (!urls.includes(u)) urls.push(u);
       used.add(i);
     }
   });
 
-  // Pass 2: phone numbers & addresses (full-line tests, label-aware)
+  // Pass 2: phone numbers (anywhere in a line) & addresses
   lines.forEach((line, i) => {
     if (used.has(i)) return;
-    const stripped = line.replace(LABEL_RE, '').trim();
-    const digits = (stripped.match(/\d/g) || []).length;
-    if (digits >= 7 && PHONE_CHARS_RE.test(stripped)) {
-      phones.push(stripped);
+    const masked = line.replace(EMAIL_RE, ' '); // don't read digits out of emails
+    const found = extractPhones(masked);
+    if (found.length) {
+      for (const p of found) {
+        const k = phoneKey(p);
+        if (!phones.some((q) => phoneKey(q) === k)) phones.push(p);
+      }
       used.add(i);
       return;
     }
+    const stripped = line.replace(LABEL_RE, '').trim();
+    const digits = (stripped.match(/\d/g) || []).length;
     if (digits > 0 && (stripped.includes(',') || ADDRESS_KW_RE.test(stripped)) && wordCount(stripped) >= 2) {
       addresses.push(stripped);
       used.add(i);
@@ -191,9 +405,10 @@ export function parseCardText(rawText) {
     if (!hasDigit(lines[i]) && wordCount(lines[i]) <= 8) companyIdx = leftovers.shift();
   }
 
-  if (nameIdx > -1) out.name = lines[nameIdx];
-  if (desigIdx > -1) out.designation = lines[desigIdx];
-  if (companyIdx > -1) out.company = lines[companyIdx];
+  const clean = (s) => String(s || '').replace(/^[\s,;:.]+/, '').replace(/[\s,;:]+$/, '');
+  if (nameIdx > -1) out.name = clean(lines[nameIdx]);
+  if (desigIdx > -1) out.designation = clean(lines[desigIdx]);
+  if (companyIdx > -1) out.company = clean(lines[companyIdx]);
 
   out.email = emails[0] || '';
   out.website = (urls.find((u) => /^https?:\/\/(www\.)?/i.test(u)) || urls[0] || '')
@@ -210,6 +425,26 @@ export function parseCardText(rawText) {
 
   out.name = out.name ? titleCaseNormalize(out.name) : '';
   return out;
+}
+
+function nameScore(line) {
+  const tokens = line.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2 || tokens.length > 4) return 0;
+  if (!tokens.every(isNameToken)) return 0;
+  if (hasDigit(line)) return 0;
+  if (DESIGNATION_RE.test(line) || COMPANY_RE.test(line) || EMAIL_RE.test(line)) return 0;
+  const titleIsh = tokens.every((t) => /^[A-Z\u0980-\u09FF]/.test(t));
+  return 1 + (titleIsh ? 1 : 0) + (tokens.length <= 3 ? 0.5 : 0);
+}
+
+function normalizeUrl(u) {
+  let url = String(u || '').trim().replace(/[.,;)]+$/, '');
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  return url;
+}
+
+function looksLikeUrlLine(line) {
+  return BARE_DOMAIN_RE.test(line) && !line.includes('@') && /\.[A-Za-z]{2,}$/.test(line.split('/').pop() || '');
 }
 
 /* keep title casing tidy without importing util.js (stays Node-testable) */

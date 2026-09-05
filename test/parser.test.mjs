@@ -1,7 +1,7 @@
 /* Unit tests for the OCR field parser (js/ocr.js).
    Run with:  npm test   (or: node test/parser.test.mjs)                */
 
-import { parseCardText } from '../js/ocr.js';
+import { parseCardText, parseCardTextDual } from '../js/ocr.js';
 
 let passed = 0, failed = 0;
 
@@ -17,6 +17,14 @@ function check(label, actual, expected) {
 function testCase(title, text, expect) {
   console.log(`• ${title}`);
   const out = parseCardText(text);
+  for (const [key, val] of Object.entries(expect)) {
+    check(key, out[key], val);
+  }
+}
+
+function testCaseDual(title, sparseText, blockText, expect) {
+  console.log(`• ${title}`);
+  const out = parseCardTextDual(sparseText, blockText);
   for (const [key, val] of Object.entries(expect)) {
     check(key, out[key], val);
   }
@@ -114,6 +122,95 @@ testCase(
   'email + url on lines with extra labels',
   ['Priya Nair', 'consultant', 'E: priya@zenith.in', 'Web: https://zenith.in/about'].join('\n'),
   { name: 'Priya Nair', designation: 'Consultant', email: 'priya@zenith.in', website: 'zenith.in/about' }
+);
+
+/* ---- v1.3.1 OCR-robustness cases (validated in the OCR lab) -------------- */
+
+testCase(
+  'phone label without separator',
+  ['Muhammad Arif Chowdhury', 'Deputy General Manager', 'Phone +880 1819-998877', 'Mobile 01711-223344'].join('\n'),
+  { phone: '+880 1819-998877, 01711-223344' }
+);
+
+testCase(
+  'label-only lines (sparse OCR split) are dropped, not kept as notes',
+  ['Muhammad Arif Chowdhury', 'Phone', 'Tel', 'Mobile', 'Email', 'Web'].join('\n'),
+  { name: 'Muhammad Arif Chowdhury', notes: '' }
+);
+
+testCase(
+  'company split across lines with "&" is joined',
+  ['APEX ENGINEERING &', 'CONSULTANCY LTD.', 'Arif Chowdhury'].join('\n'),
+  { company: 'APEX ENGINEERING & CONSULTANCY LTD.' }
+);
+
+testCase(
+  'email with lost dot (blurry photo) is repaired',
+  ['Nusrat Jahan', 'Senior Product Manager', 'nusrat jahan@bengalsolutions.com'].join('\n'),
+  { email: 'nusrat.jahan@bengalsolutions.com' }
+);
+
+testCase(
+  'email with comma domain (OCR misread) is repaired',
+  ['Bengal Solutions Ltd.', 'info@bengalsolutions,com'].join('\n'),
+  { email: 'info@bengalsolutions.com' }
+);
+
+testCase(
+  'website with comma domain is repaired',
+  ['Bengal Solutions Ltd.', 'www.bengalsolutions,com'].join('\n'),
+  { website: 'www.bengalsolutions.com' }
+);
+
+testCase(
+  'two numbers on one line',
+  ['Apex Tower', 'Tel: 02-8877665 Mobile: 01711-223344'].join('\n'),
+  { phone: '02-8877665, 01711-223344' }
+);
+
+testCase(
+  'same number in +880 and 0 forms is not duplicated',
+  ['Nusrat Jahan', '+880 1712-345678', '01712-345678'].join('\n'),
+  { phone: '+880 1712-345678' }
+);
+
+testCase(
+  'labelled address line keeps its label stripped',
+  ['Rakib Hasan', 'Add: House 5, Road 2, Dhanmondi, Dhaka'].join('\n'),
+  { address: 'House 5, Road 2, Dhanmondi, Dhaka' }
+);
+
+testCaseDual(
+  'dual-pass merge: sparse (good email, fragmented address) + block (good address)',
+  [
+    'BENGAL SOLUTIONS LTD.',
+    'Nusrat Jahan',
+    'Senior Product Manager',
+    '+880 1712-345678',
+    'nusrat jahan@bengalsolutions.com',
+    'www.bengalsolutions.com',
+    'Dhaka 1205',
+    'House 1',
+    '2, Road 5, Dhanmondi,'
+  ].join('\n'),
+  [
+    'BENGAL SOLUTIONS LTD.',
+    'Nusrat Jahan',
+    'Senior Product Manager',
+    '+880 1712-345678',
+    'nusrat.jahan@bengalsolutions.com',
+    'www.bengalsolutions.com',
+    'House 12, Road 5, Dhanmondi, Dhaka 1205'
+  ].join('\n'),
+  {
+    name: 'Nusrat Jahan',
+    designation: 'Senior Product Manager',
+    company: 'BENGAL SOLUTIONS LTD.',
+    phone: '+880 1712-345678',
+    email: 'nusrat.jahan@bengalsolutions.com',
+    website: 'www.bengalsolutions.com',
+    address: 'House 12, Road 5, Dhanmondi, Dhaka 1205'
+  }
 );
 
 /* ------------------------------------------------------------------------ */
