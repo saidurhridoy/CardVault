@@ -10,8 +10,8 @@
    NEVER put the service_role key here.
    ========================================================================== */
 
-export const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
-export const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+export const SUPABASE_URL = 'https://parxbunzpvtmynzelvoc.supabase.co';
+export const SUPABASE_ANON_KEY = 'sb_publishable_IdAbFCTer57ZR6Gfeyibxg_SOU62eoj';
 
 export const APP_NAME = 'CardVault';
 export const APP_VERSION = '1.1.0';

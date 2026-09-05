@@ -11,9 +11,19 @@ process.on('unhandledRejection', (e) => { console.error('UNHANDLED REJECTION:', 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 
+/* The test always runs in UNCONFIGURED mode (setup screen + demo mode),
+   regardless of the real values in js/config.js — patch it on the fly.  */
+const patchConfig = (src) => src
+  .replace(/^export const SUPABASE_URL = .*$/m, "export const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';")
+  .replace(/^export const SUPABASE_ANON_KEY = .*$/m, "export const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';");
+
 const server = createServer(async (req, res) => {
   try {
     const path = req.url.split('?')[0] === '/' ? '/index.html' : req.url.split('?')[0];
+    if (path === '/js/config.js') {
+      res.writeHead(200, { 'content-type': 'text/javascript' });
+      return res.end(patchConfig(await readFile('.' + path, 'utf8')));
+    }
     const body = await readFile('.' + path);
     res.writeHead(200, { 'content-type': MIME[extname(path)] || 'application/octet-stream' });
     res.end(body);
