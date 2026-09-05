@@ -13,6 +13,7 @@ cloud sync, and **vCard export** to your phone's contacts.
 [![License: MIT](https://img.shields.io/badge/License-MIT-4f46e5.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-0891b2.svg)](CONTRIBUTING)
 ![No build step](https://img.shields.io/badge/no--build--step-vanilla--JS-16a34a)
+[![Live demo](https://img.shields.io/badge/live-demo-16a34a)](https://cardvault-app.surge.sh)
 
 </div>
 
@@ -43,6 +44,11 @@ cloud sync, and **vCard export** to your phone's contacts.
 | 📴 **Offline-first PWA** | Install it to your home screen; the app shell and OCR engine keep working without a network |
 | 🌙 **Dark mode** | Follows your system theme automatically |
 | 🔐 **Private by design** | Images live in a *private* storage bucket served via short-lived signed URLs; the anon key is public-safe behind RLS |
+
+## 🌐 Live demo
+
+Try it right now at **https://cardvault-app.surge.sh** — tap **“Try demo mode”**
+(no signup needed; demo cards stay on your device).
 
 ## 🚀 Quick start
 
