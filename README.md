@@ -37,8 +37,9 @@ cloud sync, and **vCard export** to your phone's contacts.
 | 🔍 **On-device OCR** | Tesseract.js reads the card *on your phone* — no server, no API key, no per-scan cost. Details are pre-filled for you to confirm |
 | 🧠 **Smart field parsing** | Name, designation, company, phone, email, website and address are auto-detected from the scanned text |
 | ⚡ **Instant search** | Search by **name, company, designation**, email, phone or notes — phone numbers match even without `+` or spaces |
-| ☁️ **Cloud sync** | Free Supabase backend: create an account and your cards follow you to any device. Row-Level Security means *only you* can see your cards |
-| 🧪 **Demo mode** | Try the whole app with zero setup — data stays on the device, and can be imported into your cloud account later |
+| ☁️ **Accounts & cloud sync** | **Login required** — email + password or one-tap **Google / Apple** sign-in (Supabase Auth, passwords hashed server-side). Cards sync to any device; Row-Level Security means *only you* can see them, and card photos are stored in your project's private storage |
+| 📇 **Device contacts** | Import people straight from your phone's contact list (Contact Picker API, Android) and save any card back to contacts with one tap |
+| 🧪 **Demo mode** | Local development only: try everything with zero setup before connecting Supabase — live users always sign in |
 | 👤 **Save to contacts** | One tap downloads a standard **vCard (.vcf)** — with the card photo embedded — that opens straight in your phone's contacts app |
 | 📤 **Bulk export** | Export every contact as one `.vcf` file, or a JSON backup |
 | 📴 **Offline-first PWA** | Install it to your home screen; the app shell and OCR engine keep working without a network |
@@ -63,8 +64,9 @@ cd cardvault
 npm start          # or: python3 -m http.server 3000
 ```
 
-Open http://localhost:3000 — you can hit **“Try demo mode”** immediately,
-even before configuring Supabase.
+Open http://localhost:3000 — in development you can hit **"Try demo mode"**
+even before configuring Supabase (demo is hidden once the app is configured:
+real users must sign in).
 
 > Full walkthrough: **[docs/SETUP.md](docs/SETUP.md)** · Publishing to GitHub + free hosting: **[docs/PUBLISH.md](docs/PUBLISH.md)**
 

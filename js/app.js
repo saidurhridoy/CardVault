@@ -5,7 +5,7 @@
    capture, OCR review, card detail, edit, and settings.
    ========================================================================== */
 
-import { IS_CONFIGURED, APP_NAME, APP_VERSION } from './config.js';
+import { IS_CONFIGURED, APP_NAME, APP_VERSION, OAUTH_PROVIDERS } from './config.js';
 import * as db from './db.js';
 import { runOcr, parseCardText } from './ocr.js';
 import { buildVCard, buildVCardCollection, vcardFileName } from './vcard.js';
@@ -46,7 +46,9 @@ const SVG = {
   lock: I('<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
   file: I('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
   cards: I('<rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 8h7M7 11h10"/><path d="M7 15h4"/>'),
-  keyboard: I('<rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="7" y1="14" x2="17" y2="14"/>')
+  keyboard: I('<rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="7" y1="14" x2="17" y2="14"/>'),
+  google: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.27 14.29A7.16 7.16 0 0 1 4.89 12c0-.79.14-1.57.38-2.29V6.62H1.29a12 12 0 0 0 0 10.76l3.98-3.09z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.69 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"/></svg>',
+  apple: '<svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 20.28c-.98.95-2.05.86-3.08.38-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.38C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.12-.9 3.4-.82.98.07 1.81.42 2.47 1.03-2.28 1.37-2.93 4.66-.66 6.93.62.62 1.35 1.06 2.24 1.33-.43 1.19-1.05 2.27-1.53 2.7zM12.09 7.1c-.15-2.2 1.66-4.1 3.68-4.1.32 2.31-2.05 4.35-3.68 4.1z"/></svg>'
 };
 
 const SPINNER = '<span class="spinner"></span>';
@@ -199,10 +201,13 @@ async function init() {
 
   try {
     db.initCloud();
-    db.onAuthChange((event) => {
+    db.onAuthChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         state.mode = null; state.user = null; state.cards = [];
         renderAuth();
+      } else if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
+        // OAuth callback finishes asynchronously — this is the entry point for it
+        enterApp();
       }
     });
     const session = await db.getSession();
@@ -210,6 +215,12 @@ async function init() {
       enterApp();
       if (params.get('reset') === '1') openPasswordModal();
       else if (params.get('action') === 'capture') openCapture();
+    } else if (/[?&](code|error)=/.test(location.search) || location.hash.includes('access_token')) {
+      // Returning from Google/Apple — the SDK is exchanging the code; keep the
+      // splash briefly while onAuthStateChange brings us in.
+      const errText = params.get('error_description') || params.get('error');
+      if (errText) toast(decodeURIComponent(errText).replace(/\+/g, ' '), 'error', 5000);
+      setTimeout(() => { if (!state.user) renderAuth(); }, 4000);
     } else {
       renderAuth();
     }
@@ -269,12 +280,19 @@ let authTab = 'in';
 function renderAuth() {
   closeAllOverlays();
   authTab = 'in';
+  const socialButtons = OAUTH_PROVIDERS.map((p) =>
+    p === 'apple'
+      ? `<button class="btn btn-social btn-block" data-action="oauth" data-provider="apple">${SVG.apple}<span>Continue with Apple</span></button>`
+      : `<button class="btn btn-social btn-block" data-action="oauth" data-provider="google">${SVG.google}<span>Continue with Google</span></button>`
+  ).join('');
   $('#app').innerHTML = `
     <div class="center-page">
       <div class="auth-card">
         <div class="auth-logo">${SVG.cards}</div>
         <h1 class="auth-title">${APP_NAME}</h1>
-        <p class="auth-sub">Scan cards, find any contact instantly</p>
+        <p class="auth-sub">Sign in to save &amp; sync your cards</p>
+        ${socialButtons}
+        ${socialButtons ? '<div class="auth-divider"><span>or use email</span></div>' : ''}
         <div class="tabs">
           <button class="tab active" id="tabIn" type="button">Sign in</button>
           <button class="tab" id="tabUp" type="button">Create account</button>
@@ -291,10 +309,6 @@ function renderAuth() {
           <button class="btn btn-primary btn-block btn-lg" id="authSubmit" type="submit">Sign in</button>
           <div class="auth-alt"><button class="link-btn" id="forgotLink" type="button">Forgot password?</button></div>
         </form>
-        <hr class="sep">
-        <div class="auth-alt">
-          Just exploring? <button class="link-btn" data-action="demo-mode">Try demo mode</button> — data stays on this device
-        </div>
       </div>
     </div>`;
 
@@ -384,6 +398,7 @@ function friendlyAuthError(msg) {
 /* ============================================================ main view  -- */
 
 function enterApp() {
+  if (state.user && state.mode) return; // guard: getSession + OAuth event may both fire
   state.mode = db.mode();
   state.user = db.user();
   renderMain();
@@ -546,6 +561,7 @@ function renderGrid() {
         <h3>No cards yet</h3>
         <p>Capture a business card with your camera — CardVault reads the details for you and keeps them one tap away.</p>
         <button class="btn btn-primary btn-lg" data-action="capture">${SVG.camera} Scan your first card</button>
+        ${'contacts' in navigator ? `<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" data-action="import-contacts">${SVG.user} Import from contacts</button></div>` : ''}
         ${state.mode === 'local' ? '<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" data-action="add-samples">Add 3 sample cards</button></div>' : ''}
       </div>`;
     setCountLine('');
@@ -1117,6 +1133,7 @@ function openSettings() {
           : `<b>Demo mode</b> — cards are stored only in this browser. Set up Supabase (free) for accounts &amp; cloud sync.`}</span>
       </div>
       <div class="menu-list">
+        ${'contacts' in navigator ? `<button class="menu-item" data-action="import-contacts">${SVG.user}<span>Import from device contacts<span class="menu-item-sub">Pick people from your phone's address book</span></span></button>` : ''}
         <button class="menu-item" data-action="export-vcf">${SVG.download}<span>Export all contacts (.vcf)<span class="menu-item-sub">Import into Google/Apple contacts</span></span></button>
         <button class="menu-item" data-action="export-json">${SVG.file}<span>Export backup (JSON)<span class="menu-item-sub">Fields only — keep it somewhere safe</span></span></button>
         ${isCloud ? `
@@ -1176,6 +1193,56 @@ function openPasswordModal() {
       btn.disabled = false; btn.innerHTML = `${SVG.lock} Update password`;
     }
   };
+}
+
+/* ============================================================ social + contacts -- */
+
+async function doOAuthSignIn(provider) {
+  if (!provider) return;
+  const btn = document.querySelector(`[data-action="oauth"][data-provider="${provider}"]`);
+  const label = provider === 'apple' ? 'Continue with Apple' : 'Continue with Google';
+  if (btn) { btn.disabled = true; btn.innerHTML = SPINNER + 'Connecting…'; }
+  try {
+    await db.signInWithProvider(provider); // navigates away on success
+  } catch (err) {
+    toast(friendlyAuthError(err.message), 'error', 4200);
+    if (btn) { btn.disabled = false; btn.innerHTML = (provider === 'apple' ? SVG.apple : SVG.google) + `<span>${label}</span>`; }
+  }
+}
+
+/** Import people from the device's contact list (Contact Picker API). */
+async function importFromContacts() {
+  if (!('contacts' in navigator)) {
+    return toast("This browser can't pick device contacts", 'error');
+  }
+  let picked;
+  try {
+    picked = await navigator.contacts.select(['name', 'email', 'tel', 'address'], { multiple: true });
+  } catch (err) {
+    if (err?.name === 'AbortError') return; // user cancelled the picker
+    return toast('Contact access was blocked on this device', 'error');
+  }
+  if (!picked?.length) return;
+  let n = 0;
+  for (const c of picked) {
+    const a = Array.isArray(c.address) && c.address[0]
+      ? [c.address[0].street, c.address[0].city, c.address[0].region, c.address[0].country].filter(Boolean).join(', ')
+      : '';
+    const fields = {
+      name: (c.name || [])[0] || '',
+      designation: '',
+      company: '',
+      phone: (c.tel || []).filter(Boolean).join(', '),
+      email: (c.email || [])[0] || '',
+      website: '',
+      address: a,
+      notes: 'Imported from device contacts'
+    };
+    if (!fields.name && !fields.phone && !fields.email) continue;
+    try { await store.add(fields, null, ''); n++; } catch { /* skip broken entry */ }
+  }
+  await loadCards();
+  toast(`Imported ${n} contact${n === 1 ? '' : 's'} ✓`);
 }
 
 /* ============================================================ demo flows -- */
@@ -1269,6 +1336,8 @@ function onGlobalClick(e) {
       else renderSetup();
       break;
     case 'demo-mode': enterDemo(); break;
+    case 'oauth': doOAuthSignIn(t.dataset.provider); break;
+    case 'import-contacts': importFromContacts(); break;
     case 'add-samples': addSampleCards(); break;
   }
 }

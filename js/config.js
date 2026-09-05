@@ -14,9 +14,16 @@ export const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
 export const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
 export const APP_NAME = 'CardVault';
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
-/* True once you've filled in real credentials. */
+/* Social sign-in buttons shown on the login screen.
+   Each works once the matching provider is enabled in your Supabase
+   dashboard (Authentication → Providers) — see docs/SETUP.md.
+   Remove a name from this list to hide its button.                    */
+export const OAUTH_PROVIDERS = ['google', 'apple'];
+
+/* True once you've filled in real credentials.
+   Anon keys are JWTs ("eyJ…") — or the newer "sb_publishable_…" format. */
 export const IS_CONFIGURED =
   /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(SUPABASE_URL) &&
-  /^ey[A-Za-z0-9_-]+$/.test(SUPABASE_ANON_KEY);
+  /^(ey[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+){0,2}|sb_publishable_[A-Za-z0-9_-]+)$/.test(SUPABASE_ANON_KEY);

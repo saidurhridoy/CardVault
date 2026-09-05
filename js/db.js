@@ -78,6 +78,31 @@ export async function signIn(email, password) {
   return data;
 }
 
+/**
+ * Social sign-in (Google / Apple). Checks that the provider is actually
+ * enabled first — otherwise the browser would land on a raw JSON error page.
+ */
+export async function signInWithProvider(provider) {
+  const redirectTo = new URL('./', location.href).href;
+  const { data, error } = await sb.auth.signInWithOAuth({
+    provider,
+    options: { redirectTo, skipBrowserRedirect: true }
+  });
+  if (error) throw error;
+  try {
+    const res = await fetch(data.url, { redirect: 'manual' });
+    if (res.type !== 'opaqueredirect') {
+      let msg = '';
+      try { msg = (await res.json()).msg || ''; } catch { /* not JSON */ }
+      throw new Error(`Sign-in with ${provider} isn't enabled yet${msg ? ` (${msg})` : ''}`);
+    }
+  } catch (e) {
+    if (/isn't enabled yet/i.test(e.message)) throw e;
+    // network/CORS quirk — fall through and redirect anyway
+  }
+  window.location.assign(data.url);
+}
+
 export async function signOutCloud() {
   await sb.auth.signOut();
 }

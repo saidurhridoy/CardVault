@@ -56,6 +56,27 @@ That's it — you're configured. ✅
 > by Row Level Security inside your database. Just never put the
 > `service_role` key in the app (it isn't needed anywhere).
 
+## C2. Social login — Google & Apple
+
+CardVault shows **Continue with Google / Apple** buttons (see
+`OAUTH_PROVIDERS` in `js/config.js`). Each becomes active once you enable the
+matching provider in Supabase:
+
+1. In the dashboard go to **Authentication → URL Configuration** and set
+   - **Site URL:** your deployed URL (e.g. `https://cardvault-app.surge.sh`)
+   - **Redirect URLs:** add your deployed URL **and** `http://localhost:3000`
+2. **Google** (free):
+   - Go to [console.cloud.google.com](https://console.cloud.google.com) → create a project →
+     **APIs & Services → OAuth consent screen** (External, add yourself as test user) →
+     **Credentials → Create OAuth client ID** (Web application)
+   - Authorized redirect URI: `https://YOUR_PROJECT_REF.supabase.co/auth/v1/callback`
+   - Copy the **Client ID** and **Client secret** → Supabase →
+     **Authentication → Providers → Google** → enable + paste → Save
+3. **Apple** (requires a paid Apple Developer account, $99/yr):
+   - Create a **Services ID** with "Sign in with Apple" enabled, a **Key**, and note your
+     **Team ID** → paste all three into Supabase → **Authentication → Providers → Apple**
+   - No Apple account yet? Just remove `'apple'` from `OAUTH_PROVIDERS` — the button hides.
+
 ## D. Run it locally
 
 ```bash
