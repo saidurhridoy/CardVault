@@ -57,7 +57,7 @@ CardVault ships as a **standalone Android app** (built with
 [Capacitor 7](https://capacitorjs.com) — see [`native/`](native/)): the entire
 app is bundled inside the APK and runs in the app's own WebView.
 
-- ⬇️ **Download:** [CardVault-v1.3.0.apk](https://github.com/saidurhridoy/CardVault/releases/download/v1.3.0/CardVault-v1.3.0.apk) (~4.5 MB)
+- ⬇️ **Download:** [CardVault-v1.3.1.apk](https://github.com/saidurhridoy/CardVault/releases/download/v1.3.1/CardVault-v1.3.1.apk) (~4.5 MB)
 - **Android 7.0+** · no browser needed, no browser UI — it's a real app with
   its own icon, splash screen and camera permission prompt
 - Works fully offline for browsing previously synced cards; internet is only
