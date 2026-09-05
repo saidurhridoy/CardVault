@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Must match androidbrowserhelper's SplashImageTransferTask: it writes
+     filesDir/twa_splash/splash_image.png and shares it via the FileProvider.
+     (twa_files/twa_cache kept as harmless extras for the WebView fallback.) -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <files-path name="twa_files" path="twa_files" />
-    <cache-path name="twa_cache" path="twa_cache" />
+    <files-path path="twa_splash/" name="twa_splash" />
+    <files-path path="twa_files/" name="twa_files" />
+    <cache-path path="twa_cache/" name="twa_cache" />
 </paths>

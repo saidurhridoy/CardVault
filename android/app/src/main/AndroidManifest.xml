@@ -4,6 +4,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
+        android:name=".CrashReportingApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/appName"
@@ -69,7 +70,26 @@
             </intent-filter>
         </activity>
 
-        <!-- Used only by the WebView fallback (file uploads), mirrors the bubblewrap template -->
+        <!-- Focus redirection (used by TwaLauncher on the main launch path) -->
+        <activity
+            android:name="com.google.androidbrowserhelper.trusted.FocusActivity"
+            android:exported="false" />
+
+        <!-- In-app fallback if no Custom Tabs browser exists -->
+        <activity
+            android:name="com.google.androidbrowserhelper.trusted.WebViewFallbackActivity"
+            android:configChanges="orientation|screenSize"
+            android:exported="false" />
+
+        <!-- On-screen crash report (diagnostics; launched by CrashReportingApp) -->
+        <activity
+            android:name=".CrashReportActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
+        <!-- Shares the splash image with the browser (paths MUST cover
+             filesDir/twa_splash — see res/xml/filepaths.xml) -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="@string/providerAuthority"

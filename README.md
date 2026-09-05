@@ -56,7 +56,7 @@ Try it right now at **https://cardvault-app.surge.sh** — create a free account
 CardVault ships as a real, installable Android app — a **Trusted Web Activity**
 (Google's recommended PWA→APK wrapper, built from [`android/`](android/README.md)):
 
-- ⬇️ **Download:** [CardVault-v1.2.0.apk](https://github.com/saidurhridoy/CardVault/releases/download/v1.2.0/CardVault-v1.2.0.apk) (~685 KB)
+- ⬇️ **Download:** [CardVault-v1.2.1.apk](https://github.com/saidurhridoy/CardVault/releases/download/v1.2.1/CardVault-v1.2.1.apk) (~687 KB)
 - On your Android phone (5.0+): open the link → download → tap the file →
   allow "install from unknown sources" if asked → done.
 - The app launches fullscreen (no browser bar) with the CardVault icon, splash
