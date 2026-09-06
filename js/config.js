@@ -14,7 +14,7 @@ export const SUPABASE_URL = 'https://parxbunzpvtmynzelvoc.supabase.co';
 export const SUPABASE_ANON_KEY = 'sb_publishable_IdAbFCTer57ZR6Gfeyibxg_SOU62eoj';
 
 export const APP_NAME = 'CardVault';
-export const APP_VERSION = '1.4.0';
+export const APP_VERSION = '1.5.0';
 
 /* Social sign-in buttons shown on the login screen.
    Each works once the matching provider is enabled in your Supabase

@@ -40,6 +40,8 @@ cloud sync, and **vCard export** to your phone's contacts.
 | ☁️ **Accounts & cloud sync** | **Login required** — email + password or one-tap **Google / Apple** sign-in (Supabase Auth, passwords hashed server-side). Cards sync to any device; Row-Level Security means *only you* can see them, and card photos are stored in your project's private storage |
 | 📇 **Device contacts** | Import people straight from your phone's contact list (Contact Picker API, Android) and save any card back to contacts with one tap |
 | 🧪 **Demo mode** | Local development only: try everything with zero setup before connecting Supabase — live users always sign in |
+| 👥 **Team vaults** | Create a team for your company or sales crew, invite teammates by email, and share any card into the shared vault — everyone sees it, your private vault stays separate. Owner-managed members, invitations show up right inside the app |
+| 📊 **Vault insights** | One tap on a team vault: duplicate contacts across members, *"who knows whom"* relationship maps, top companies, stale contacts and per-member activity — computed in your browser, never sent anywhere |
 | 👤 **Save to contacts** | One tap downloads a standard **vCard (.vcf)** — with the card photo embedded — that opens straight in your phone's contacts app |
 | 📤 **Bulk export** | Export every contact as one `.vcf` file, or a JSON backup |
 | 📴 **Offline-first PWA** | Install it to your home screen; the app shell and OCR engine keep working without a network |
@@ -67,7 +69,10 @@ app is bundled inside the APK and runs in the app's own WebView.
 - The OCR engine files download on first scan and are cached on-device
 
 The website (below) remains the always-up-to-date web version; the APK is
-updated per release.
+updated per release. **v1.5.0 (team vaults + insights) is live on the web now**
+— it lands in the APK with the next native release. To use team vaults on an
+existing Supabase project, run **[`supabase/teams.sql`](supabase/teams.sql)**
+once in the SQL editor.
 
 ## 🚀 Quick start
 
@@ -112,14 +117,16 @@ cardvault/
 ├── css/style.css            # all styling (light + dark)
 ├── js/
 │   ├── config.js            # ⚙️ the only file you must edit (Supabase keys)
-│   ├── app.js               # views, camera, review flow, search, settings
-│   ├── db.js                # data layer: Supabase cloud + IndexedDB demo mode
+│   ├── app.js               # views, camera, review flow, search, settings, teams UI
+│   ├── db.js                # data layer: Supabase cloud + IndexedDB demo mode + team functions
+│   ├── analytics.js         # team vault insights (pure functions, unit-tested)
 │   ├── ocr.js               # Tesseract wrapper + field parser (unit-tested)
 │   ├── vcard.js             # vCard 3.0 generation
 │   └── util.js              # DOM/format/file helpers
 ├── supabase/schema.sql      # tables + RLS + storage bucket (run once)
+├── supabase/teams.sql       # v1.5.0 migration: team vaults (run once, after schema.sql)
 ├── samples/sample-card.png  # try OCR on this!
-├── test/parser.test.mjs     # npm test
+├── test/                    # parser (60) · team analytics (21) · teams UI smoke (33)
 ├── docs/SETUP.md            # Supabase + configuration guide
 └── docs/PUBLISH.md          # GitHub + free hosting guide
 ```
@@ -127,7 +134,11 @@ cardvault/
 ## 🧪 Tests
 
 ```bash
-npm test          # 29 parser assertions against realistic card layouts
+npm test                     # 60 parser assertions against realistic card layouts
+node test/analytics.test.mjs # 21 team-analytics assertions (duplicates, who-knows-whom…)
+
+# teams UI smoke test (real app.js in jsdom, stubbed Supabase — 33 checks):
+npm i --no-save jsdom && node test/ui.teams.test.mjs
 
 # optional full UI smoke test (real browser, demo mode, real OCR):
 npm i -D playwright-core && npx playwright-core install chromium
@@ -137,15 +148,18 @@ npm run test:ui   # 15 end-to-end steps: capture → OCR → save → search →
 ## 🔐 Security model
 
 - The **anon key** in `js/config.js` is *designed to be public* — like a username, not a password.
-- **Row Level Security** on `cards` restricts every query to `auth.uid() = user_id`.
+- **Row Level Security** on `cards` restricts every query to `auth.uid() = user_id` — the only addition in v1.5.0 is a read policy that lets **team members see cards shared to their team** (still only via the team's vault).
+- Team vaults: only the **owner** can rename/delete the team, invite, or remove members; invites match the **lowercased** account email; sharing/unsharing a card is restricted to its owner.
+- Team insights run **100% in your browser** over cards you can already read — nothing is computed or stored server-side.
 - Card photos sit in a **private** bucket; the app reads them via 7-day **signed URLs**.
 - **Never** commit the `service_role` key — it bypasses RLS. (It isn't needed anywhere in this app.)
 
 ## 🗺️ Roadmap
 
+- [x] Bengali OCR (eng+ben, v1.4.0)
+- [x] Team vaults + vault insights (v1.5.0)
 - [ ] Batch scan (capture several cards in a row)
-- [ ] More OCR languages (Bengali, Hindi, Arabic…)
-- [ ] Duplicate detection
+- [ ] More OCR languages (Hindi, Arabic…)
 - [ ] Tags & follow-up reminders
 - [ ] CSV export
 

@@ -188,6 +188,142 @@ export async function getImageUrl(card) {
 }
 
 /* ---------------------------------------------------------------------------
+   Team vaults (cloud only — requires supabase/teams.sql to have been run)
+   ------------------------------------------------------------------------- */
+
+function teamsNotReady(err) {
+  const msg = String(err?.message || err?.details || err || '');
+  if (/relation .* does not exist|column .* does not exist|code.*42P0?1/i.test(msg)) {
+    return new Error('Team vaults are not set up yet — run supabase/teams.sql in your Supabase SQL editor, then reload.');
+  }
+  return err;
+}
+
+export async function listMyOrgs() {
+  const uid = currentUser?.id;
+  if (!uid) return [];
+  const { data, error } = await sb
+    .from('org_members')
+    .select('role, joined_at, email, name, organizations ( id, name, owner_id, created_at )')
+    .eq('user_id', uid);
+  if (error) throw teamsNotReady(error);
+  return (data || [])
+    .filter((r) => r.organizations)
+    .map((r) => ({ ...r.organizations, role: r.role, member_name: r.name, member_email: r.email }));
+}
+
+export async function createOrg(name) {
+  const uid = currentUser?.id;
+  const clean = String(name || '').trim().slice(0, 80);
+  if (!uid) throw new Error('Sign in first.');
+  if (!clean) throw new Error('Give the team a name.');
+  const { data: org, error } = await sb
+    .from('organizations')
+    .insert({ name: clean, owner_id: uid })
+    .select()
+    .single();
+  if (error) throw teamsNotReady(error);
+  const { error: mErr } = await sb.from('org_members').insert({
+    org_id: org.id, user_id: uid, role: 'owner',
+    email: currentUser?.email || '', name: (currentUser?.user_metadata?.full_name || currentUser?.email || '').split('@')[0]
+  });
+  if (mErr) {
+    // don't leave an orphan org behind
+    await sb.from('organizations').delete().eq('id', org.id).catch(() => {});
+    throw teamsNotReady(mErr);
+  }
+  return org;
+}
+
+export async function listMembers(orgId) {
+  const { data, error } = await sb
+    .from('org_members')
+    .select('user_id, role, email, name, joined_at')
+    .eq('org_id', orgId)
+    .order('joined_at');
+  if (error) throw teamsNotReady(error);
+  return data || [];
+}
+
+export async function inviteMember(orgId, email) {
+  const clean = String(email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clean)) throw new Error('Enter a valid email address.');
+  const { error } = await sb.from('org_invites')
+    .insert({ org_id: orgId, email: clean, invited_by: currentUser?.id });
+  if (error) {
+    if (/duplicate key/i.test(error.message)) throw new Error('That person is already invited.');
+    throw teamsNotReady(error);
+  }
+  return true;
+}
+
+export async function removeMember(orgId, userId) {
+  const { error } = await sb.from('org_members')
+    .delete().eq('org_id', orgId).eq('user_id', userId);
+  if (error) throw teamsNotReady(error);
+}
+
+export async function leaveOrg(orgId) {
+  return removeMember(orgId, currentUser?.id);
+}
+
+export async function deleteOrg(orgId) {
+  const { error } = await sb.from('organizations').delete().eq('id', orgId);
+  if (error) throw teamsNotReady(error);
+}
+
+export async function myPendingInvites() {
+  const email = String(currentUser?.email || '').toLowerCase();
+  if (!email) return [];
+  const { data, error } = await sb
+    .from('org_invites')
+    .select('id, email, organizations ( id, name, owner_id )')
+    .eq('email', email);
+  if (error) throw teamsNotReady(error);
+  return (data || []).filter((r) => r.organizations)
+    .map((r) => ({ id: r.id, org: r.organizations }));
+}
+
+export async function acceptInvite(inviteId) {
+  const email = String(currentUser?.email || '').toLowerCase();
+  const { data: inv, error: qErr } = await sb.from('org_invites')
+    .select('id, org_id').eq('id', inviteId).eq('email', email).single();
+  if (qErr || !inv) throw new Error('That invitation is no longer available.');
+  const { error } = await sb.from('org_members').insert({
+    org_id: inv.org_id, user_id: currentUser.id, role: 'member', email,
+    name: (currentUser?.user_metadata?.full_name || currentUser?.email || '').split('@')[0]
+  });
+  if (error) throw teamsNotReady(error);
+  await sb.from('org_invites').delete().eq('id', inviteId).catch(() => {});
+}
+
+export async function declineInvite(inviteId) {
+  const { error } = await sb.from('org_invites')
+    .delete().eq('id', inviteId).eq('email', String(currentUser?.email || '').toLowerCase());
+  if (error) throw teamsNotReady(error);
+}
+
+export async function shareCardToOrg(cardId, orgId) {
+  const { error } = await sb.from('cards').update({ org_id: orgId }).eq('id', cardId);
+  if (error) throw teamsNotReady(error);
+}
+
+export async function unshareCard(cardId) {
+  const { error } = await sb.from('cards').update({ org_id: null }).eq('id', cardId);
+  if (error) throw teamsNotReady(error);
+}
+
+export async function listOrgCards(orgId) {
+  const { data, error } = await sb
+    .from('cards')
+    .select('*')
+    .eq('org_id', orgId)
+    .order('created_at', { ascending: false });
+  if (error) throw teamsNotReady(error);
+  return data || [];
+}
+
+/* ---------------------------------------------------------------------------
    Local: IndexedDB demo store (graceful fallback to memory in sandboxed iframes)
    ------------------------------------------------------------------------- */
 

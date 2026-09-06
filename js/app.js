@@ -9,6 +9,7 @@ import { IS_CONFIGURED, APP_NAME, APP_VERSION, OAUTH_PROVIDERS, OCR_LANGS } from
 import * as db from './db.js';
 import { recognizeCard, parseCardText, mergeCardParses } from './ocr.js';
 import { buildVCard, buildVCardCollection, vcardFileName } from './vcard.js';
+import { computeTeamAnalytics } from './analytics.js';
 import {
   $, esc, debounce, toast, uid, formatDate, initials, gradientFor,
   copyText, fileToDataUrl, downscaleDataUrl, dataUrlToBlob, smallPhotoBase64,
@@ -37,6 +38,7 @@ const SVG = {
   zap: I('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'),
   image: I('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>'),
   sliders: I('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
+  users: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
   logout: I('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'),
   upload: I('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>'),
   check: I('<polyline points="20 6 9 17 4 12"/>'),
@@ -69,7 +71,11 @@ const state = {
   query: '',
   sort: 'newest',
   loading: false,
-  offline: false
+  offline: false,
+  teams: [],           // orgs I belong to (cloud)
+  pendingInvites: [],  // org invites addressed to my email
+  activeTeam: null,    // org being viewed (team vault mode)
+  teamMembers: []     // members of activeTeam (for attribution + analytics)
 };
 
 const store = {
@@ -425,7 +431,39 @@ function enterApp() {
   state.user = db.user();
   renderMain();
   loadCards();
-  if (state.mode === 'cloud') maybeOfferDemoImport();
+  if (state.mode === 'cloud') {
+    maybeOfferDemoImport();
+    refreshTeams(); // quiet — surfaces invites & enables "share to team"
+  }
+}
+
+/** Load my teams + pending invites in the background (cloud only). */
+async function refreshTeams() {
+  if (state.mode !== 'cloud') return;
+  try {
+    state.teams = await db.listMyOrgs();
+    state.pendingInvites = await db.myPendingInvites();
+    if (state.pendingInvites.length) {
+      toast(`📬 You have ${state.pendingInvites.length} team invitation${state.pendingInvites.length > 1 ? 's' : ''} — open Teams`, 'info', 5000);
+    }
+  } catch (err) {
+    console.warn('Teams unavailable:', err.message);
+    state.teams = [];
+    state.pendingInvites = [];
+  }
+}
+
+/** Banner shown while browsing a team vault instead of personal cards. */
+function updateTeamBanner() {
+  const el = $('#teamBanner');
+  if (!el) return;
+  if (!state.activeTeam) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="offline-banner" style="display:flex;gap:10px;align-items:center">
+      ${SVG.users}<span style="flex:1"><b>${esc(state.activeTeam.name)}</b> — team vault</span>
+      <button class="btn btn-outline btn-sm" data-action="team-analytics">${SVG.sliders} Insights</button>
+      <button class="btn btn-outline btn-sm" data-action="team-exit">Exit</button>
+    </div>`;
 }
 
 async function enterDemo() {
@@ -448,11 +486,13 @@ function renderMain() {
           ${state.mode === 'local' ? '<span class="chip chip-demo">Demo · this device</span>' : ''}
         </div>
         <div class="topbar-actions">
+          ${state.mode === 'cloud' ? `<button class="icon-btn" data-action="teams" aria-label="Team vaults" title="Team vaults">${SVG.users}</button>` : ''}
           <button class="icon-btn" data-action="settings" aria-label="Settings" title="Settings">${SVG.sliders}</button>
         </div>
       </div>
     </header>
     <main class="main">
+      <div id="teamBanner"></div>
       <div class="toolbar">
         <div class="search">
           ${SVG.search}
@@ -469,7 +509,7 @@ function renderMain() {
       <p class="count-line" id="countLine"></p>
       <div id="grid" class="grid" aria-live="polite"></div>
     </main>
-    <button class="fab" data-action="capture" aria-label="Scan a new card" title="Scan a card">${SVG.camera}</button>`;
+    ${state.activeTeam ? '' : `<button class="fab" data-action="capture" aria-label="Scan a new card" title="Scan a card">${SVG.camera}</button>`}`;
 
   const si = $('#searchInput');
   si.addEventListener('input', debounce(() => {
@@ -486,6 +526,27 @@ function renderMain() {
 async function loadCards() {
   state.loading = true;
   renderGrid();
+  if (state.activeTeam) {
+    // ---- team vault mode: shared cards + member list (no offline cache)
+    try {
+      state.teamMembers = await db.listMembers(state.activeTeam.id);
+      state.cards = await db.listOrgCards(state.activeTeam.id);
+      state.offline = false;
+    } catch (err) {
+      console.error(err);
+      toast(err.message || 'Could not load the team vault', 'error', 5000);
+      state.activeTeam = null;
+      state.cards = [];
+      updateTeamBanner();
+      state.loading = false;
+      return loadCards();
+    }
+    state.loading = false;
+    updateTeamBanner();
+    renderGrid();
+    hydrateImages();
+    return;
+  }
   try {
     state.cards = await store.list();
     state.offline = false;
@@ -502,6 +563,7 @@ async function loadCards() {
     toast('Could not reach the cloud — showing cached copy', 'error');
   }
   state.loading = false;
+  updateTeamBanner();
   renderGrid();
   if (state.mode === 'cloud') hydrateImages();
 }
@@ -550,7 +612,10 @@ function avatarHtml(label, extraStyle = '') {
 function tileHtml(c) {
   const label = c.name || c.company || 'Untitled';
   const imgUrl = state.mode === 'local' ? (c.image_data || null) : (c._imgUrl || null);
-  const sub = [c.designation, c.company].filter(Boolean).join(' · ') || c.email || c.phone || '';
+  let sub = [c.designation, c.company].filter(Boolean).join(' · ') || c.email || c.phone || '';
+  if (state.activeTeam && c.user_id !== state.user?.id) {
+    sub = (sub ? sub + ' · ' : '') + 'by ' + memberName(c.user_id);
+  }
   return `
     <article class="tile" data-action="open-detail" data-id="${esc(c.id)}" tabindex="0" role="button" aria-label="${esc(label)}">
       <div class="tile-img">
@@ -577,7 +642,13 @@ function renderGrid() {
   }
 
   if (!state.cards.length) {
-    grid.innerHTML = `
+    grid.innerHTML = state.activeTeam ? `
+      <div class="empty" style="grid-column:1/-1">
+        ${SVG.users}
+        <h3>Nothing shared yet</h3>
+        <p>Cards shared to <b>${esc(state.activeTeam.name)}</b> will appear here. Exit the team view, open one of your cards and tap “Share to team”.</p>
+        <button class="btn btn-primary btn-lg" data-action="team-exit">${SVG.users} Back to my vault</button>
+      </div>` : `
       <div class="empty" style="grid-column:1/-1">
         ${SVG.cards}
         <h3>No cards yet</h3>
@@ -609,6 +680,319 @@ function renderGrid() {
 function setCountLine(text) {
   const el = $('#countLine');
   if (el) el.textContent = text;
+}
+
+/* ============================================================ teams      -- */
+
+const teamMemberCache = new Map(); // orgId -> members[]
+let manageOpenOrgId = null;
+
+function memberName(userId) {
+  const m = (state.teamMembers || []).find((x) => x.user_id === userId);
+  return m ? (m.name || m.email || 'Member') : 'Former member';
+}
+
+async function openTeams() {
+  if (state.mode !== 'cloud') return toast('Team vaults need a cloud account', 'info');
+  manageOpenOrgId = null;
+  const backdrop = openSheet(`
+    ${sheetHead('Team vaults')}
+    <div class="sheet-body" id="teamsBody">Loading…</div>`, { wide: true });
+  await renderTeamsBody(backdrop);
+}
+
+async function renderTeamsBody(backdrop) {
+  const body = (backdrop || document).querySelector?.('#teamsBody');
+  if (!body) return;
+  body.innerHTML = `${SPINNER} Loading teams…`;
+  let teams, invites, members;
+  try {
+    [teams, invites] = await Promise.all([db.listMyOrgs(), db.myPendingInvites()]);
+    state.teams = teams;
+    state.pendingInvites = invites;
+  } catch (err) {
+    body.innerHTML = `
+      <div class="notice notice-warn">${SVG.alert}<span><b>${esc(err.message)}</b><br>
+      In Supabase: SQL Editor → paste <code>supabase/teams.sql</code> → Run, then reload this page.</span></div>`;
+    return;
+  }
+  if (manageOpenOrgId && !teams.some((t) => t.id === manageOpenOrgId)) manageOpenOrgId = null;
+  if (manageOpenOrgId) {
+    try { members = await db.listMembers(manageOpenOrgId); teamMemberCache.set(manageOpenOrgId, members); }
+    catch (e) { members = teamMemberCache.get(manageOpenOrgId) || []; }
+  }
+
+  const inviteHtml = invites.length ? `
+    <h3 class="settings-h" style="margin-top:4px">Invitations</h3>
+    ${invites.map((i) => `
+      <div style="display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)">
+        <div style="flex:1"><b>${esc(i.org.name)}</b><br><span class="dim">Team invitation</span></div>
+        <button class="btn btn-primary btn-sm" data-action="team-accept" data-id="${esc(i.id)}">Accept</button>
+        <button class="btn btn-outline btn-sm" data-action="team-decline" data-id="${esc(i.id)}">✕</button>
+      </div>`).join('')}` : '';
+
+  const teamRows = teams.length ? `
+    <h3 class="settings-h" style="margin-top:14px">Your teams</h3>
+    ${teams.map((t) => `
+      <div style="padding:12px 0;border-bottom:1px solid rgba(0,0,0,.08)">
+        <div style="display:flex;gap:10px;align-items:center">
+          <div style="flex:1;min-width:0">
+            <b>${esc(t.name)}</b> ${t.role === 'owner' ? '<span class="chip chip-demo">Owner</span>' : ''}
+            <br><span class="dim">${t.role === 'owner' ? 'You manage this team' : 'Member'}</span>
+          </div>
+          <button class="btn btn-outline btn-sm" data-action="team-open" data-id="${esc(t.id)}">Open</button>
+          <button class="btn btn-outline btn-sm" data-action="team-manage" data-id="${esc(t.id)}">${manageOpenOrgId === t.id ? 'Close' : 'Manage'}</button>
+        </div>
+        ${manageOpenOrgId === t.id ? renderManageSection(t, members || []) : ''}
+      </div>`).join('')}` : '';
+
+  body.innerHTML = `
+    ${inviteHtml}
+    ${teamRows}
+    <h3 class="settings-h" style="margin-top:18px">Create a team</h3>
+    <p class="dim" style="margin:0 0 8px">A shared vault for your company or sales team — everyone sees the cards you share, and you keep your private vault separate.</p>
+    <div style="display:flex;gap:8px">
+      <input class="input" id="newTeamName" maxlength="80" placeholder="e.g. Apex Sales Team" style="flex:1">
+      <button class="btn btn-primary btn-sm" data-action="team-create">${SVG.check} Create</button>
+    </div>`;
+  const input = body.querySelector('#newTeamName');
+  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') createTeamFromSheet(); });
+}
+
+function renderManageSection(org, members) {
+  const isOwner = org.role === 'owner';
+  const rows = members.map((m) => `
+    <div style="display:flex;gap:8px;align-items:center;padding:6px 0">
+      <div style="flex:1;min-width:0">${esc(m.name || m.email || 'Member')}
+        ${m.role === 'owner' ? '<span class="chip chip-demo">Owner</span>' : ''}
+        <br><span class="dim" style="font-size:.8rem">${esc(m.email || '')}</span></div>
+      ${isOwner && m.role !== 'owner' ? `<button class="btn btn-outline btn-sm" data-action="team-remove-member" data-id="${esc(org.id)}" data-user="${esc(m.user_id)}">Remove</button>` : ''}
+    </div>`).join('');
+  return `
+    <div style="margin-top:10px;padding:12px;background:rgba(0,0,0,.03);border-radius:12px">
+      <div style="font-weight:600;margin-bottom:4px">Members (${members.length})</div>
+      ${rows || '<p class="dim">No members yet.</p>'}
+      ${isOwner ? `
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <input class="input" id="inviteEmail-${esc(org.id)}" placeholder="teammate@company.com" style="flex:1">
+          <button class="btn btn-primary btn-sm" data-action="team-invite" data-id="${esc(org.id)}">Invite</button>
+        </div>
+        <p class="dim" style="font-size:.8rem;margin:6px 0 0">They see the invitation in their Teams menu after signing up with this email.</p>
+        <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center">
+          <button class="btn btn-outline btn-sm" data-action="team-analytics" data-id="${esc(org.id)}">${SVG.sliders} Insights</button>
+          <button class="btn btn-outline btn-sm" style="color:#b91c1c" data-action="team-delete" data-id="${esc(org.id)}">Delete team</button>
+        </div>` : `
+        <div style="margin-top:12px">
+          <button class="btn btn-outline btn-sm" data-action="team-leave" data-id="${esc(org.id)}" style="color:#b91c1c">Leave team</button>
+        </div>`}
+    </div>`;
+}
+
+async function createTeamFromSheet() {
+  const input = document.querySelector('#newTeamName');
+  const name = input?.value?.trim();
+  if (!name) return toast('Give the team a name', 'error');
+  try {
+    await db.createOrg(name);
+    toast('Team created ✓ Now invite your teammates');
+    manageOpenOrgId = null;
+    await renderTeamsBody();
+  } catch (err) { toast(err.message || 'Could not create the team', 'error'); }
+}
+
+async function inviteFromSheet(orgId) {
+  const input = document.getElementById('inviteEmail-' + orgId);
+  try {
+    await db.inviteMember(orgId, input?.value);
+    input.value = '';
+    toast('Invitation saved ✓ They will see it in their Teams menu');
+    await renderTeamsBody();
+  } catch (err) { toast(err.message || 'Could not invite', 'error'); }
+}
+
+async function acceptInviteFlow(inviteId) {
+  try {
+    await db.acceptInvite(inviteId);
+    toast('You joined the team ✓');
+    manageOpenOrgId = null;
+    await renderTeamsBody();
+  } catch (err) { toast(err.message || 'Could not accept', 'error'); }
+}
+
+async function declineInviteFlow(inviteId) {
+  try { await db.declineInvite(inviteId); await renderTeamsBody(); }
+  catch (err) { toast(err.message || 'Could not decline', 'error'); }
+}
+
+async function removeMemberFlow(orgId, userId) {
+  const ok = await confirmDialog('Remove this member from the team?', 'Remove');
+  if (!ok) return;
+  try { await db.removeMember(orgId, userId); toast('Member removed'); await renderTeamsBody(); }
+  catch (err) { toast(err.message || 'Could not remove member', 'error'); }
+}
+
+async function leaveTeamFlow(orgId) {
+  const ok = await confirmDialog('Leave this team? Your shared cards stay with the team.', 'Leave team');
+  if (!ok) return;
+  try {
+    await db.leaveOrg(orgId);
+    if (state.activeTeam?.id === orgId) { state.activeTeam = null; loadCards(); }
+    toast('You left the team');
+    manageOpenOrgId = null;
+    await renderTeamsBody();
+  } catch (err) { toast(err.message || 'Could not leave', 'error'); }
+}
+
+async function deleteTeamFlow(orgId) {
+  const ok = await confirmDialog('Delete this team? Shared cards return to their owners private vaults.', 'Delete team');
+  if (!ok) return;
+  try {
+    await db.deleteOrg(orgId);
+    if (state.activeTeam?.id === orgId) { state.activeTeam = null; loadCards(); }
+    toast('Team deleted');
+    manageOpenOrgId = null;
+    await renderTeamsBody();
+  } catch (err) { toast(err.message || 'Could not delete', 'error'); }
+}
+
+function toggleManage(orgId) {
+  manageOpenOrgId = manageOpenOrgId === orgId ? null : orgId;
+  renderTeamsBody();
+}
+
+function openTeamView(orgId) {
+  const org = state.teams.find((t) => t.id === orgId);
+  if (!org) return;
+  state.activeTeam = org;
+  state.query = '';
+  closeAllOverlays();
+  renderMain();
+  loadCards();
+}
+
+function exitTeamView() {
+  state.activeTeam = null;
+  state.teamMembers = [];
+  renderMain();
+  loadCards();
+}
+
+/** Small chooser: which team should this card be shared with? */
+function openShareChooser(cardId) {
+  if (!state.teams.length) {
+    return toast('Create a team first (Teams button in the header)', 'info', 4500);
+  }
+  openSheet(`
+    ${sheetHead('Share to team')}
+    <div class="sheet-body">
+      <p class="dim" style="margin-top:0">Everyone in the team will be able to see this card in the shared vault. It also stays in your private vault.</p>
+      ${state.teams.map((t) => `
+        <button class="btn btn-outline btn-block" style="margin-bottom:8px;justify-content:flex-start" data-action="do-share" data-id="${esc(cardId)}" data-org="${esc(t.id)}">
+          ${SVG.users} ${esc(t.name)}
+        </button>`).join('')}
+    </div>`);
+}
+
+async function doShare(cardId, orgId) {
+  try {
+    await db.shareCardToOrg(cardId, orgId);
+    const t = state.teams.find((x) => x.id === orgId);
+    toast(`Shared with ${t ? t.name : 'the team'} ✓`);
+    closeAllOverlays();
+    const c = state.cards.find((x) => x.id === cardId);
+    if (c) { c.org_id = orgId; openDetail(cardId); }
+  } catch (err) { toast(err.message || 'Could not share', 'error'); }
+}
+
+async function doUnshare(cardId) {
+  try {
+    await db.unshareCard(cardId);
+    toast('Card is private again ✓');
+    const c = state.cards.find((x) => x.id === cardId);
+    if (c) { c.org_id = null; openDetail(cardId); }
+  } catch (err) { toast(err.message || 'Could not unshare', 'error'); }
+}
+
+/** Team insights: duplicates, shared relationships, stale contacts, who-knows-whom. */
+async function openTeamAnalytics(orgId) {
+  const org = (orgId && state.teams.find((t) => t.id === orgId)) || state.activeTeam;
+  if (!org) return;
+  openSheet(`
+    ${sheetHead(`Insights — ${esc(org.name)}`)}
+    <div class="sheet-body" id="teamAnalyticsBody">${SPINNER} Crunching the vault…</div>`, { wide: true });
+  const body = document.querySelector('#teamAnalyticsBody');
+  if (!body) return;
+  let cards, members;
+  try {
+    if (state.activeTeam?.id === org.id && state.cards.length) {
+      members = state.teamMembers;
+      cards = state.cards;
+    } else {
+      [members, cards] = await Promise.all([db.listMembers(org.id), db.listOrgCards(org.id)]);
+    }
+  } catch (err) {
+    body.innerHTML = `<div class="notice notice-warn">${SVG.alert}<span>${esc(err.message)}</span></div>`;
+    return;
+  }
+  const a = computeTeamAnalytics(cards, members);
+  const rel = a.duplicates.filter((d) => d.shared).slice(0, 10);
+  const own = a.duplicates.filter((d) => !d.shared).slice(0, 10);
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;margin-bottom:14px">
+      ${[
+        [a.totalCards, 'cards'],
+        [a.activity.length, 'members'],
+        [a.crossMemberContacts, 'shared<br>contacts'],
+        [a.duplicateGroups, 'duplicate<br>groups']
+      ].map(([n, l]) => `
+        <div style="background:rgba(79,70,229,.07);border-radius:12px;padding:10px 4px">
+          <div style="font-size:1.5rem;font-weight:700;color:#4f46e5">${n}</div>
+          <div class="dim" style="font-size:.75rem">${l}</div>
+        </div>`).join('')}
+    </div>
+
+    ${a.whoKnowsWhom.length ? `
+      <h3 class="settings-h">Who knows whom</h3>
+      ${a.whoKnowsWhom.slice(0, 8).map((p) => `
+        <div style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,.08)">
+          <b>${esc(p.a)}</b> ↔ <b>${esc(p.b)}</b>
+          <br><span class="dim">${p.sharedCount} shared contact${p.sharedCount > 1 ? 's' : ''} · ${esc(p.sharedCompanies.slice(0, 3).join(', '))}</span>
+        </div>`).join('')}` : ''}
+
+    ${rel.length ? `
+      <h3 class="settings-h" style="margin-top:14px">Known by several of you (${rel.length})</h3>
+      ${rel.map((d) => `
+        <div style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,.08)">
+          <b>${esc(d.label)}</b>${d.company ? ` <span class="dim">· ${esc(d.company)}</span>` : ''}
+          <br><span class="dim">Known by ${esc(d.knownBy.join(' + '))}</span>
+        </div>`).join('')}` : ''}
+
+    ${own.length ? `
+      <h3 class="settings-h" style="margin-top:14px">Duplicates to clean up (${own.length})</h3>
+      ${own.map((d) => `
+        <div style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,.08)">
+          ${esc(d.label)}${d.company ? ` <span class="dim">· ${esc(d.company)}</span>` : ''}
+          <br><span class="dim">Saved ${d.cards.length}× by ${esc(d.knownBy[0])} — consider deleting one</span>
+        </div>`).join('')}` : ''}
+
+    ${a.topCompanies.length ? `
+      <h3 class="settings-h" style="margin-top:14px">Top companies in the vault</h3>
+      ${a.topCompanies.map((c) => `
+        <div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.08)">
+          <div style="flex:1">${esc(c.company)}</div><b>${c.count}</b>
+        </div>`).join('')}` : ''}
+
+    ${a.stale.length ? `
+      <details class="rawtext" style="margin-top:14px">
+        <summary>Stale contacts — added 6+ months ago (${a.stale.length})</summary>
+        ${a.stale.slice(0, 20).map((s) => `<div style="padding:6px 0;border-bottom:1px solid rgba(0,0,0,.08)">${esc(s.name)}${s.company ? ` <span class="dim">· ${esc(s.company)}</span>` : ''}<br><span class="dim">Added by ${esc(s.addedBy)} · ${esc(formatDate(s.created_at))}</span></div>`).join('')}
+      </details>` : ''}
+
+    ${a.activity.length ? `
+      <details class="rawtext" style="margin-top:8px">
+        <summary>Member activity</summary>
+        ${a.activity.map((m) => `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.08)"><div style="flex:1">${esc(m.name)} ${m.role === 'owner' ? '<span class="chip chip-demo">Owner</span>' : ''}<br><span class="dim" style="font-size:.8rem">${esc(m.email)}</span></div><b>${m.cards}</b></div>`).join('')}
+      </details>` : ''}`;
 }
 
 /* ============================================================ capture    -- */
@@ -1052,6 +1436,9 @@ function openDetail(id) {
   const web = c.website ? (/^https?:\/\//i.test(c.website) ? c.website : 'https://' + c.website) : '';
   const maps = c.address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.address) : '';
   const imgUrl = state.mode === 'local' ? (c.image_data || null) : (c._imgUrl || null);
+  const isMine = state.mode === 'local' || c.user_id === state.user?.id;
+  const inTeamView = !!state.activeTeam;
+  const sharedOrg = c.org_id ? state.teams.find((t) => t.id === c.org_id) : null;
 
   const row = (icon, label, value, href) => `
     <div class="detail-row">
@@ -1090,12 +1477,20 @@ function openDetail(id) {
         ${maps ? `<a class="act" href="${esc(maps)}" target="_blank" rel="noopener">${SVG.map} Map</a>` : ''}
         <button class="act" data-action="vcard" data-id="${esc(c.id)}">${SVG.download} Save contact</button>
         <button class="act" data-action="share" data-id="${esc(c.id)}">${SVG.share} Share</button>
-        <button class="act" data-action="edit" data-id="${esc(c.id)}">${SVG.edit} Edit</button>
-        <button class="act act-danger" data-action="delete" data-id="${esc(c.id)}">${SVG.trash} Delete</button>
+        ${isMine ? `<button class="act" data-action="edit" data-id="${esc(c.id)}">${SVG.edit} Edit</button>` : ''}
+        ${isMine ? `<button class="act act-danger" data-action="delete" data-id="${esc(c.id)}">${SVG.trash} Delete</button>` : ''}
       </div>
+      ${state.mode === 'cloud' && isMine && !inTeamView ? (c.org_id
+        ? `<div class="detail-actions" style="padding-top:0">
+             <span class="act" style="cursor:default">${SVG.users} Shared with ${esc(sharedOrg ? sharedOrg.name : 'team')}</span>
+             <button class="act" data-action="unshare-card" data-id="${esc(c.id)}">${SVG.x} Unshare</button>
+           </div>`
+        : (state.teams.length ? `<div class="detail-actions" style="padding-top:0">
+             <button class="act" data-action="share-to-team" data-id="${esc(c.id)}">${SVG.users} Share to team…</button>
+           </div>` : '')) : ''}
       ${rows ? `<div class="detail-fields">${rows}</div>` : ''}
       ${c.raw_text ? `<details class="rawtext" style="margin:0 18px 14px"><summary>Scanned text</summary><pre>${esc(c.raw_text)}</pre></details>` : ''}
-      <p class="detail-meta">Added ${esc(formatDate(c.created_at))} · ${state.mode === 'local' ? 'demo mode' : 'cloud sync'}</p>
+      <p class="detail-meta">${inTeamView && !isMine ? `Added by ${esc(memberName(c.user_id))} · ` : ''}${esc(formatDate(c.created_at))} · ${state.mode === 'local' ? 'demo mode' : 'cloud sync'}</p>
     </div>`);
 
   // Resolve image asynchronously if not cached yet (cloud)
@@ -1440,6 +1835,21 @@ function onGlobalClick(e) {
       break;
     }
     case 'settings': openSettings(); break;
+    case 'teams': openTeams(); break;
+    case 'team-open': openTeamView(id); break;
+    case 'team-exit': exitTeamView(); break;
+    case 'team-manage': toggleManage(id); break;
+    case 'team-create': createTeamFromSheet(); break;
+    case 'team-invite': inviteFromSheet(id); break;
+    case 'team-accept': acceptInviteFlow(id); break;
+    case 'team-decline': declineInviteFlow(id); break;
+    case 'team-remove-member': removeMemberFlow(id, t.dataset.user); break;
+    case 'team-leave': leaveTeamFlow(id); break;
+    case 'team-delete': deleteTeamFlow(id); break;
+    case 'team-analytics': openTeamAnalytics(id); break;
+    case 'share-to-team': openShareChooser(id); break;
+    case 'do-share': doShare(id, t.dataset.org); break;
+    case 'unshare-card': doUnshare(id); break;
     case 'close-modal': requestCloseTop(); break;
     case 'zoom-image': if (t.dataset.src) openZoom(t.dataset.src); break;
     case 'vcard': saveVCardFile(id); break;

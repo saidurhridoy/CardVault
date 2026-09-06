@@ -26,6 +26,11 @@ credit card is required.
 2. Open [`supabase/schema.sql`](../supabase/schema.sql) from this repo, **copy everything**, paste it into the editor.
 3. Click **Run**. You should see `Success. No rows returned`.
 
+**Optional — team vaults (v1.5.0):** repeat the same steps with
+[`supabase/teams.sql`](../supabase/teams.sql) to enable shared team vaults
+(organizations, invitations, sharing). The script is idempotent — safe to
+re-run. Without it, the Teams button simply says the feature isn't set up yet.
+
 That single script creates:
 
 | Object | Purpose |
@@ -109,6 +114,7 @@ Cloudflare Pages — all have free tiers and zero build configuration.
 | App shows the “connect Supabase” screen | `js/config.js` still has placeholders, or the SDK CDN was blocked — check the values and your connection |
 | `Sign-in failed / Invalid API key` on login | Wrong URL or you pasted the `service_role` key instead of the anon key |
 | Cards list is empty right after signup | Run `supabase/schema.sql` (section B) — the `cards` table is probably missing |
+| Teams button says teams aren't set up | Run `supabase/teams.sql` in the SQL editor (see section B) |
 | Card photos never load | Re-run the storage policies part of `schema.sql`; the bucket must be private with the four policies |
 | Camera doesn't open | Browsers only allow camera on `https://` (or `localhost`) — deploy with HTTPS or test locally |
 | First OCR scan is slow | The engine (~4 MB) downloads once, then is cached by the service worker and works offline |
