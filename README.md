@@ -13,7 +13,7 @@ cloud sync, and **vCard export** to your phone's contacts.
 [![License: MIT](https://img.shields.io/badge/License-MIT-4f46e5.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-0891b2.svg)](CONTRIBUTING)
 ![No build step](https://img.shields.io/badge/no--build--step-vanilla--JS-16a34a)
-[![Live demo](https://img.shields.io/badge/live-demo-16a34a)](https://cardvault-app.surge.sh)
+[![Live demo](https://img.shields.io/badge/live-demo-16a34a)](https://saidurhridoy.github.io/CardVault/)
 
 </div>
 
@@ -48,7 +48,7 @@ cloud sync, and **vCard export** to your phone's contacts.
 
 ## 🌐 Live demo
 
-Try it right now at **https://cardvault-app.surge.sh** — create a free account
+Try it right now at **https://saidurhridoy.github.io/CardVault/** — create a free account
 (email confirmation) and start scanning. Works in any modern browser.
 
 ## 📱 Install on Android (native app)

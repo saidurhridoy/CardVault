@@ -193,6 +193,7 @@ function confirmDialog(message, confirmLabel = 'Confirm', { danger = true } = {}
 async function init() {
   bindGlobalEvents();
   registerServiceWorker();
+  maybeShowIosInstallTip();
 
   const params = new URLSearchParams(location.search);
 
@@ -228,6 +229,24 @@ async function init() {
     console.error(err);
     renderSetup({ sdkOffline: true });
   }
+}
+
+/* iPhone users don't need the App Store — the PWA runs fullscreen with its
+   own icon and camera once added to the Home Screen. Nudge them once.   */
+function maybeShowIosInstallTip() {
+  try {
+    if (window.CARDVAULT_NATIVE) return;
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true;
+    if (!isIOS || standalone) return;
+    if (localStorage.getItem('cv_ios_tip_shown')) return;
+    localStorage.setItem('cv_ios_tip_shown', '1');
+    setTimeout(() => {
+      toast("📲 Install CardVault like an app — tap the Share (⬆️) button, then 'Add to Home Screen'", 'info', 9000);
+    }, 1500);
+  } catch (e) { /* never block boot */ }
 }
 
 function registerServiceWorker() {
