@@ -1,7 +1,7 @@
 {
-  "name": "CardVault — Business Card Scanner",
+  "name": "CardVault — Contact Vault",
   "short_name": "CardVault",
-  "description": "Scan business cards with your camera, auto-extract details with on-device OCR, and find any contact instantly by name, company, or designation.",
+  "description": "Keep every business contact in one searchable vault. Photograph a visiting card and its details are added automatically — then find any contact in seconds.",
   "id": "cardvault",
   "start_url": "./",
   "scope": "./",
@@ -9,11 +9,28 @@
   "orientation": "portrait-primary",
   "background_color": "#f4f5fb",
   "theme_color": "#4f46e5",
-  "categories": ["productivity", "business", "utilities"],
+  "categories": [
+    "productivity",
+    "business",
+    "utilities"
+  ],
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
   "shortcuts": [
     {
@@ -21,7 +38,12 @@
       "short_name": "Scan",
       "description": "Open the camera to scan a new business card",
       "url": "./?action=capture",
-      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     }
   ]
 }

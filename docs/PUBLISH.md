@@ -13,7 +13,7 @@ If you haven't yet:
 cd cardvault
 git init                      # (already done if you cloned)
 git add .
-git commit -m "CardVault v1.0.0 — business card scanner PWA"
+git commit -m "CardVault v1.0.0 — business contact vault PWA"
 ```
 
 1. Go to **https://github.com/new**

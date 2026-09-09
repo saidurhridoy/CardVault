@@ -33,11 +33,11 @@ cloud sync, and **vCard export** to your phone's contacts.
 
 | | |
 |---|---|
-| 📷 **Camera capture** | Live viewfinder with a card guide frame, front/back flip, and flashlight — or pick a photo from your gallery |
-| 🔍 **On-device OCR** | Tesseract.js reads the card *on your phone* — no server, no API key, no per-scan cost. Details are pre-filled for you to confirm |
-| 🧠 **Smart field parsing** | Name, designation, company, phone, email, website and address are auto-detected from the scanned text |
+| 🗄️ **A real vault, not a scan dump** | Contacts are stored, organized and searchable forever — name, designation, company, phones, emails, website, address, notes and the original card photo |
 | ⚡ **Instant search** | Search by **name, company, designation**, email, phone or notes — phone numbers match even without `+` or spaces |
-| ☁️ **Accounts & cloud sync** | **Login required** — email + password or one-tap **Google / Apple** sign-in (Supabase Auth, passwords hashed server-side). Cards sync to any device; Row-Level Security means *only you* can see them, and card photos are stored in your project's private storage |
+| 📷 **Scan to add, automatically** | Live viewfinder with a card guide frame, front/back flip, and flashlight — or pick a photo from your gallery. Tesseract.js reads the card *on your phone* — no server, no API key, no per-scan cost — and the fields are pre-filled for you to confirm |
+| 🧠 **Smart field parsing** | Name, designation, company, phone, email, website and address are auto-detected from the scanned text |
+| ☁️ **Accounts & cloud sync** | **Login required** — email + password or one-tap **Google / Apple** sign-in (Supabase Auth, passwords hashed server-side). Contacts sync to any device; Row-Level Security means *only you* can see them, and card photos are stored in your project's private storage |
 | 📇 **Device contacts** | Import people straight from your phone's contact list (Contact Picker API, Android) and save any card back to contacts with one tap |
 | 🧪 **Demo mode** | Local development only: try everything with zero setup before connecting Supabase — live users always sign in |
 | 👥 **Team vaults** | Create a team for your company or sales crew, invite teammates by email, and share any card into the shared vault — everyone sees it, your private vault stays separate. Owner-managed members, invitations show up right inside the app |
@@ -51,7 +51,7 @@ cloud sync, and **vCard export** to your phone's contacts.
 ## 🌐 Live demo
 
 Try it right now at **https://saidurhridoy.github.io/CardVault/** — create a free account
-(email confirmation) and start scanning. Works in any modern browser.
+(email confirmation) and start adding contacts. Works in any modern browser.
 
 ## 📱 Install on Android (native app)
 
