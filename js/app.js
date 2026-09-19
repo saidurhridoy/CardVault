@@ -13,7 +13,7 @@ import { computeTeamAnalytics } from './analytics.js';
 import {
   $, esc, debounce, toast, uid, formatDate, initials, gradientFor,
   copyText, fileToDataUrl, downscaleDataUrl, dataUrlToBlob, smallPhotoBase64,
-  downloadText, downloadBlob, safeStore, titleCaseIfShouting
+  downloadText, downloadBlob, safeStore, titleCaseIfShouting, coverRectToVideo
 } from './util.js';
 
 /* ---------------------------------------------------------------- icons -- */
@@ -1124,9 +1124,21 @@ function captureFrame(el) {
   const video = cam.video;
   if (!video || !video.videoWidth) return toast('Camera not ready', 'error');
   const c = document.createElement('canvas');
-  c.width = video.videoWidth;
-  c.height = video.videoHeight;
-  c.getContext('2d').drawImage(video, 0, 0);
+  const crop = guideCropRect(el, video);
+  if (crop) {
+    // Crop to what the user framed in the guide (plus a small margin) —
+    // keeps desk/hands/background out of the photo so OCR sees mostly card.
+    c.width = Math.round(crop.sw);
+    c.height = Math.round(crop.sh);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, c.width, c.height);
+  } else {
+    c.width = video.videoWidth;
+    c.height = video.videoHeight;
+    c.getContext('2d').drawImage(video, 0, 0);
+  }
   const raw = c.toDataURL('image/jpeg', 0.92);
   const cb = cam.onCaptured;
   cam.onCaptured = null;
@@ -1134,6 +1146,30 @@ function captureFrame(el) {
   downscaleDataUrl(raw, 1600, 0.85)
     .then((dataUrl) => (cb ? cb(dataUrl) : openReview(dataUrl)))
     .catch(() => (cb ? cb(raw) : openReview(raw)));
+}
+
+/**
+ * Video-pixel rect matching the on-screen guide box (the frame the user is
+ * told to fit the card into), expanded by 6% so a card that overhangs the
+ * frame slightly is not cut off. Returns null when a fallback to the full
+ * frame is safer (guide hidden, camera not laid out yet, degenerate rect).
+ */
+function guideCropRect(el, video) {
+  const guide = el.querySelector('.cam-frame-box');
+  if (!guide) return null;
+  const gr = guide.getBoundingClientRect();
+  const vr = video.getBoundingClientRect();
+  if (!gr.width || !gr.height || !vr.width || !vr.height) return null;
+  const M = 0.06;
+  const rect = {
+    left: gr.left - vr.left - gr.width * M,
+    top: gr.top - vr.top - gr.height * M,
+    width: gr.width * (1 + 2 * M),
+    height: gr.height * (1 + 2 * M)
+  };
+  const crop = coverRectToVideo(rect, vr.width, vr.height, video.videoWidth, video.videoHeight);
+  if (crop.sw < 50 || crop.sh < 50) return null;
+  return crop;
 }
 
 /** Stack front + back photos into one image (stored as the card photo). */

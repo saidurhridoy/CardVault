@@ -1,5 +1,31 @@
 /* Small DOM / format / file helpers shared across the app. */
 
+/* ---------- camera framing ---------- */
+
+/**
+ * Map a screen-space rect onto the SOURCE video frame, for a <video> rendered
+ * with CSS `object-fit: cover` inside a view of viewW × viewH.
+ * Cover centers the video and crops the overflowing axis, so:
+ *   scale  s = max(viewW/vidW, viewH/vidH)
+ *   offset ox = (viewW - vidW*s)/2, oy = (viewH - vidH*s)/2  (≤ 0 on the cropped axis)
+ * A screen point (x, y) then corresponds to video pixel ((x-ox)/s, (y-oy)/s).
+ * Returns {sx, sy, sw, sh} in video pixels, clamped to the frame.
+ */
+export function coverRectToVideo(rect, viewW, viewH, vidW, vidH) {
+  const s = Math.max(viewW / vidW, viewH / vidH);
+  const ox = (viewW - vidW * s) / 2;
+  const oy = (viewH - vidH * s) / 2;
+  let sx = (rect.left - ox) / s;
+  let sy = (rect.top - oy) / s;
+  let sw = rect.width / s;
+  let sh = rect.height / s;
+  sx = Math.max(0, Math.min(sx, vidW));
+  sy = Math.max(0, Math.min(sy, vidH));
+  sw = Math.max(0, Math.min(sw, vidW - sx));
+  sh = Math.max(0, Math.min(sh, vidH - sy));
+  return { sx, sy, sw, sh };
+}
+
 /* ---------- DOM ---------- */
 
 export function $(sel, root = document) { return root.querySelector(sel); }
