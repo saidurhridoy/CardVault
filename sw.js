@@ -1,6 +1,6 @@
 /* CardVault service worker — offline app shell + CDN runtime cache.
    Bump CACHE_VERSION whenever you change any app file, so users get the update. */
-const CACHE_VERSION = 'cardvault-v9';
+const CACHE_VERSION = 'cardvault-v10';
 
 const APP_SHELL = [
   './',

@@ -1139,11 +1139,11 @@ function captureFrame(el) {
     c.height = video.videoHeight;
     c.getContext('2d').drawImage(video, 0, 0);
   }
-  const raw = c.toDataURL('image/jpeg', 0.92);
+  const raw = c.toDataURL('image/jpeg', 0.95);
   const cb = cam.onCaptured;
   cam.onCaptured = null;
   requestCloseTop(true); // also stops the camera via onClose
-  downscaleDataUrl(raw, 1600, 0.85)
+  downscaleDataUrl(raw, 1600, 0.9)
     .then((dataUrl) => (cb ? cb(dataUrl) : openReview(dataUrl)))
     .catch(() => (cb ? cb(raw) : openReview(raw)));
 }
@@ -1921,3 +1921,4 @@ document.addEventListener('keydown', (e) => {
 });
 
 init();
+

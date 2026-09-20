@@ -14,7 +14,7 @@
      OCR-mangled emails (lost dots / commas), "&" company continuations
    ========================================================================== */
 
-import { preprocessForOcr } from './ocr-pre.js';
+import { preprocessForOcr, cloneImage, unsharpMask, otsuBinarize } from './ocr-pre.js';
 
 /* ---------------------------------------------------------------------------
    OCR engine (browser only)
@@ -103,29 +103,42 @@ export async function recognizeCard(image, onProgress, opts) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const src = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-  // preprocess: auto-crop the card, resize into the sweet spot, stretch contrast
-  let proc = src;
-  try { proc = preprocessForOcr(src); } catch (e) { /* keep raw */ }
-  const procCanvas = document.createElement('canvas');
-  procCanvas.width = proc.width;
-  procCanvas.height = proc.height;
-  procCanvas.getContext('2d').putImageData(
-    new ImageData(new Uint8ClampedArray(proc.data.buffer ? proc.data.buffer : proc.data), proc.width, proc.height),
-    0, 0
-  );
+  // Preprocess once (auto-crop + resize + contrast stretch), then build a
+  // variant per OCR pass — lab-validated best-of-both (A/B'd against clean,
+  // blurred, noisy, shadowed and tilted captures):
+  //   sparse pass (PSM 11): unsharp-masked  → rescues small/soft text
+  //   block  pass (PSM 6) : Otsu-binarized  → rescues blurred/noisy text
+  // parseCardTextDual merges per field, so each pass contributes its wins.
+  let base = src, sparseImg = src, blockImg = src;
+  try {
+    base = preprocessForOcr(src);
+    sparseImg = unsharpMask(base, 0.5);
+    blockImg = otsuBinarize(cloneImage(base));
+  } catch (e) { /* keep raw */ }
+
+  const imgToCanvas = (img) => {
+    const cv = document.createElement('canvas');
+    cv.width = img.width;
+    cv.height = img.height;
+    cv.getContext('2d').putImageData(
+      new ImageData(new Uint8ClampedArray(img.data.buffer ? img.data.buffer : img.data), img.width, img.height),
+      0, 0
+    );
+    return cv;
+  };
 
   try {
     const worker = await getWorker(langs, onProgress);
     const PSM = (window.Tesseract && window.Tesseract.PSM) || {};
-    // Pass 1 — sparse text: best for isolated labels, emails, numbers
-    const sparseText = await recognizeWithPsm(worker, procCanvas, PSM.SPARSE_TEXT || '11');
-    // Pass 2 — single block: best for reading order (multi-line addresses)
-    const blockText = await recognizeWithPsm(worker, procCanvas, PSM.SINGLE_BLOCK || '6');
+    // Pass 1 — sparse text on the sharpened image: best for isolated labels, emails, numbers
+    const sparseText = await recognizeWithPsm(worker, imgToCanvas(sparseImg), PSM.SPARSE_TEXT || '11');
+    // Pass 2 — single block on the binarized image: best for reading order (multi-line addresses)
+    const blockText = await recognizeWithPsm(worker, imgToCanvas(blockImg), PSM.SINGLE_BLOCK || '6');
     const fields = parseCardTextDual(sparseText, blockText);
     return { text: (sparseText + '\n' + blockText).trim(), fields };
   } catch (e) {
     // fall back to the one-shot API (still on the preprocessed image)
-    const res = await window.Tesseract.recognize(procCanvas, langs, {
+    const res = await window.Tesseract.recognize(imgToCanvas(base), langs, {
       logger: (m) => { if (onProgress) onProgress(m); }
     });
     const text = (res && res.data && res.data.text) || '';

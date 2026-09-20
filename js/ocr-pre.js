@@ -3,11 +3,42 @@
    ({ data: RGBA bytes, width, height }). No platform APIs, so the exact same
    code runs in the browser (fed from a <canvas>) and in Node (lab / tests).
    Pipeline: crop to the card → resize into the size band Tesseract likes →
-   grayscale + percentile contrast stretch → optional Otsu binarization.
+   grayscale + percentile contrast stretch → unsharp mask / Otsu binarization
+   (the app's dual OCR passes use one variant each — see ocr.js).
    ========================================================================== */
 
 export function cloneImage(img) {
   return { width: img.width, height: img.height, data: new Uint8ClampedArray(img.data) };
+}
+
+/**
+ * 3×3 unsharp mask: out = px + amount × (px − blur(px)). Mild sharpening
+ * recovers small text softened by capture/JPEG — lab-validated (rescues
+ * fields on shadowed captures, never worse on clean ones; amount 0.5).
+ * Pure; returns a NEW image.
+ */
+export function unsharpMask(img, amount = 0.5) {
+  const { width: w, height: h, data } = img;
+  const out = { width: w, height: h, data: new Uint8ClampedArray(data.length) };
+  const blurAt = (x, y, c) => {
+    let sum = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+      sum += data[(yy * w + xx) * 4 + c];
+      n++;
+    }
+    return sum / n;
+  };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const p = (y * w + x) * 4;
+    for (let c = 0; c < 3; c++) {
+      const v = data[p + c];
+      out.data[p + c] = Math.max(0, Math.min(255, Math.round(v + amount * (v - blurAt(x, y, c)))));
+    }
+    out.data[p + 3] = data[p + 3];
+  }
+  return out;
 }
 
 /** Luminance array (internal). */
